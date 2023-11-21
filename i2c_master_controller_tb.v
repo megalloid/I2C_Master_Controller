@@ -69,8 +69,7 @@ module i2c_master_controller_tb;
 		
 		i_din = 8'b10101010;
 		
-		#1000;
-		$stop;
+
 		
 	end
 	
@@ -87,6 +86,8 @@ module i2c_master_controller_tb;
 		end else if (counter == 5) 
 		begin
 			i_cmd = STOP_CMD;
+			#50;
+			$stop;
 		end
 	end
 	
