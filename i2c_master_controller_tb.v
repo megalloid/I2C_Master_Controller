@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module i2c_master_controller_tb;
+module i2c_bit_controller_tb;
 	
 	// Clock
 	reg i_clk;
