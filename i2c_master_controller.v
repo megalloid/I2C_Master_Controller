@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 
-module i2c_master_controller (
+module i2c_bit_controller (
 	input i_reset_n, 
 	input i_clk, 
 	
