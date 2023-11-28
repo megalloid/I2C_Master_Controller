@@ -1,42 +1,43 @@
 `timescale 1ns / 1ps
 
-module i2c_bit_controller_tb;
+module i2c_master_controller_tb;
 	
 	// Clock
-	reg i_clk;
+	reg clk_r;
+	
 	localparam CLK_PERIOD = 10;
-	always #(CLK_PERIOD/2) i_clk = ~i_clk;
+	always #(CLK_PERIOD/2) clk_r = ~clk_r;
 
 	// Registers
-	reg i_reset_n = 1'b1;
-	reg [2:0] i_cmd;
-	reg [3:0] o_state;
-	reg o_ready;
-	reg i_wr_i2c = 0;
-	reg [4:0] o_bit_count;
-	reg [4:0] counter = 0;
+	reg rstn_r = 1'b1;
+	reg [2:0] cmd_r;
+	reg [3:0] state_r;
+	reg ready_r;
+	reg wr_i2c_r = 0;
+	reg [4:0] bit_count_r;
+	reg [4:0] counter_r = 0;
 	
-	reg [7:0] i_din;
+	reg [7:0] din_r;
 	
 	// Wires
-	wire io_scl;
-	wire io_sda;
+	wire scl_w;
+	wire sda_w;
 
-	i2c_master_controller uut(
-		.i_reset_n(i_reset_n),
-		.i_clk(i_clk),
+	i2c_bit_controller uut(
+		.rstn_i(rstn_r),
+		.clk_i(clk_r),
 		
-		.i_wr_i2c(i_wr_i2c),
-		.i_cmd(i_cmd),
+		.wr_i2c_i(wr_i2c_r),
+		.cmd_i(cmd_r),
 		
-		.i_din(i_din),
+		.din_i(din_r),
 		
-		.o_state(o_state),
-		.o_ready(o_ready),
-		.o_bit_count(o_bit_count),
+		.state_o(state_r),
+		.ready_o(ready_r),
+		.bit_count_o(bit_count_r),
 		
-		.io_sda(io_sda),
-		.io_scl(io_scl)
+		.sda_io(sda_w),
+		.scl_io(scl_w)
 	);
 	
 
@@ -49,45 +50,59 @@ module i2c_bit_controller_tb;
 	
 	initial begin
 	
-		i_reset_n = 0;
-		i_clk = 0;
+		rstn_r = 0;
+		clk_r = 0;
 		
 		#10;
 		
-		i_reset_n = 1;
+		rstn_r = 1;
 		
 		#10;
 		
-		i_cmd = START_CMD;	
+		cmd_r = START_CMD;	
 		
 		#10; 
 		
-		i_wr_i2c = 1;
-		i_din = 8'b11111111;
+		wr_i2c_r = 1;
+		din_r = 8'b11111111;
 		
 		#400;
 		
-		i_din = 8'b10101010;
-		
-
+		din_r = 8'b10101010;
 		
 	end
 	
-	always @(posedge o_ready) begin
-		counter = counter + 1;
+	always @(posedge ready_r) begin
+	
+		counter_r = counter_r + 1;
 		
-		if (counter == 3)
+		if (counter_r == 1)
 		begin
-			i_cmd = RESTART_CMD;
-			i_din = 8'b10101010;
-		end else if (counter == 4) 
+		
+			cmd_r = RESTART_CMD;
+			din_r = 8'b10101010;
+			
+		end 
+		else if (counter_r == 3)
 		begin
-			i_cmd = WR_CMD;
-		end else if (counter == 5) 
+		
+			cmd_r = RESTART_CMD;
+			din_r = 8'b10101010;
+			
+		end 
+		else if (counter_r == 4) 
 		begin
-			i_cmd = STOP_CMD;
+		
+			cmd_r = WR_CMD;
+			
+		end 
+		else if (counter_r == 5) 
+		begin
+		
+			cmd_r = STOP_CMD;
 			#50;
 			$stop;
+			
 		end
 	end
 	
