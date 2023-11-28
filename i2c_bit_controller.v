@@ -1,38 +1,41 @@
 `timescale 1ns/1ps
 
-module i2c_bit_controller (
-	input i_reset_n, 
-	input i_clk, 
+module i2c_bit_controller 
+
+	// Порты
+	(
+	input rstn_i, 
+	input clk_i, 
 	
-	input i_wr_i2c,
-	input [2:0] i_cmd, 
+	input wr_i2c_i,
+	input [2:0] cmd_i, 
 	
-	input [7:0] i_din,
-	output [7:0] o_dout,
-	output o_ack,
+	input [7:0] din_i,
+	output [7:0] dout_o,
+	output ack_o,
 	
-	output [3:0] o_state,
-	output o_ready,
-	output [4:0] o_bit_count,
+	output [3:0] state_o,
+	output ready_o,
+	output [4:0] bit_count_o,
 		
-	inout tri io_sda,
-  	output tri io_scl
+	inout tri sda_io,
+   	output tri scl_io
 );
 
-	// Commands constants
+	// Команды
 	localparam START_CMD   			= 3'b001;
 	localparam WR_CMD      			= 3'b010;
 	localparam RD_CMD      			= 3'b011;
 	localparam STOP_CMD    			= 3'b100;
 	localparam RESTART_CMD 			= 3'b101;
 		
-	// States
+	// Состояния FSM
 	localparam IDLE_STATE 			= 4'b0001;
 	localparam START1_STATE  		= 4'b0010;
 	localparam START2_STATE  		= 4'b0011;
 	localparam HOLD_STATE  			= 4'b0100;
-	localparam RESTART1_STATE  	= 4'b0101;
-	localparam RESTART2_STATE  	= 4'b0110;
+	localparam RESTART1_STATE  		= 4'b0101;
+	localparam RESTART2_STATE  		= 4'b0110;
 	localparam STOP1_STATE  		= 4'b0111;
 	localparam STOP2_STATE  		= 4'b1000;
 	localparam STOP3_STATE			= 4'b1001;
@@ -42,142 +45,145 @@ module i2c_bit_controller (
 	localparam DATA4_STATE  		= 4'b1101;
 	localparam DATAEND_STATE 		= 4'b1110;
 	
+	// Регистры
+	reg ready_r;
+	reg data_phase_r;
+	
+	reg [7:0] state_r;
+	reg [7:0] state_next_r;
+	
+	reg [3:0] cmd_r;
+	reg [3:0] cmd_next_r;
 
-	reg reg_ready;
-	reg data_phase;
+	reg [4:0] bit_r;
+	reg [4:0] bit_next_r;
 	
-	reg [7:0] state_reg;
-	reg [7:0] state_next;
+	reg [8:0] tx_r;
+	reg [8:0] tx_next_r;
 	
-	reg [3:0] cmd_reg;
-	reg [3:0] cmd_next;
-
-	reg [4:0] bit_reg;
-	reg [4:0] bit_next;
+	reg [8:0] rx_r;
+	reg [8:0] rx_next_r;
 	
-	reg [8:0] tx_reg;
-	reg [8:0] tx_next;
+	reg sda_out_r;
+	reg scl_out_r;
+	reg sda_r;
+	reg scl_r;
 	
-	reg [8:0] rx_reg;
-	reg [8:0] rx_next;
+	// Провода
+	wire into_w;
+	wire nack_w;
 	
-	reg sda_out;
-	reg scl_out;
-	reg sda_reg;
-	reg scl_reg;
-	
-
-	wire into;
-	wire nack;
-	
-	always @(posedge i_clk, negedge i_reset_n)
+	always @(posedge clk_i, negedge rstn_i)
 	begin
-		if (~i_reset_n) 
+		if (~rstn_i) 
 		begin
-			sda_reg <= 1'b1;
-			scl_reg <= 1'b1;
-      		end else 
+			sda_r <= 1'b1;
+			scl_r <= 1'b1;
+      	end else 
 		begin
-         		sda_reg <= sda_out;
-         		scl_reg <= scl_out;
+         		sda_r <= sda_out_r;
+         		scl_r <= scl_out_r;
       		end
-      end
+	end
 	
-   	assign io_scl = (scl_reg) ? 1'bz : 1'b0;
+   	assign scl_io = (scl_r) ? 1'bz : 1'b0;
    
-assign into = (data_phase && cmd_reg == RD_CMD && bit_reg < 8) || (data_phase && cmd_reg == WR_CMD && bit_reg == 8); 
-
-assign io_sda = (into || sda_reg) ? 1'bz : 1'b0;
+   	assign into_w = (data_phase_r && cmd_r == RD_CMD && bit_r < 8) || (data_phase_r && cmd_r == WR_CMD && bit_r == 8); 
+   	assign sda_io = (into_w || sda_r) ? 1'bz : 1'b0;
 	
-	assign o_dout = rx_reg[8:1];
-   	assign o_ack = rx_reg[0];    // obtained from slave in write 
-	assign nack = i_din[0];      // used by master in read operation 
+	assign dout_o 	= rx_r[8:1];
+   	assign ack_o 	= rx_r[0];    
+	assign nack_w 	= din_i[0];     
 	
-
-	assign o_state = state_reg;
-	assign o_ready = reg_ready;
-	assign o_bit_count = bit_reg;
+	// Отладочный вывод 
+	assign state_o = state_r;
+	assign ready_o = ready_r;
+	assign bit_count_o = bit_r;
 	
-
-   	always @(posedge i_clk, negedge i_reset_n)
-    	begin
-      		if (~i_reset_n) begin
-         		state_reg <= IDLE_STATE;
-			bit_reg   <= 0;
-			cmd_reg   <= 0;
-			tx_reg    <= 0;
-			rx_reg    <= 0;
-      		end else begin
-         		state_reg <= state_next;
-			bit_reg   <= bit_next;
-			cmd_reg   <= cmd_next;
-			tx_reg    <= tx_next;
-			rx_reg    <= rx_next;
+   // Обновление регистров
+   always @(posedge clk_i, negedge rstn_i)
+    begin
+      if (~rstn_i) begin
+         	state_r <= IDLE_STATE;
+		bit_r   <= 0;
+		cmd_r   <= 0;
+		tx_r    <= 0;
+		rx_r    <= 0;
       end
-end  
+      else begin
+		state_r <= state_next_r;
+		bit_r   <= bit_next_r;
+		cmd_r   <= cmd_next_r;
+		tx_r   	<= tx_next_r;
+		rx_r    <= rx_next_r;
+      end
+	end  
 	
-	always @(*)
-  	begin
+	// Next-state машина
+   always @(*)
+   begin
 	
-      		state_next = state_reg;
-		reg_ready = 1'b0;
-		cmd_next = cmd_reg;
-		bit_next = bit_reg;
-		scl_out = 1'b1;
-      		sda_out = 1'b1;
-		data_phase = 1'b0;
-		tx_next = tx_reg;
-		rx_next = rx_reg;
+      state_next_r 	= state_r;
+		ready_r 			= 1'b0;
+		cmd_next_r 		= cmd_r;
+		bit_next_r 		= bit_r;
+		scl_out_r 		= 1'b1;
+      		sda_out_r		= 1'b1;
+		data_phase_r 	= 1'b0;
+		tx_next_r 		= tx_r;
+		rx_next_r 		= rx_r;
 		
-		case (state_reg)
+		case (state_r)
 			
 			IDLE_STATE: begin
-				reg_ready = 1'b1;	
+				ready_r = 1'b1;	
 				
-				if(i_wr_i2c && i_cmd == START_CMD)
+				if(wr_i2c_i && cmd_i == START_CMD)
 				begin
-					state_next = START1_STATE;
+					state_next_r = START1_STATE;
 				end
 				
 			end
 			
 			START1_STATE: begin 
-				sda_out = 1'b0;
-								
-				state_next = START2_STATE;
+			
+				sda_out_r = 1'b0;								
+				state_next_r = START2_STATE;
 				
 			end
 			
 			START2_STATE: begin 
-				sda_out = 1'b0;
-            			scl_out = 1'b0;
+			
+				sda_out_r = 1'b0;
+            			scl_out_r = 1'b0;
 				
-				state_next = HOLD_STATE;
+				state_next_r = HOLD_STATE;
 				
 			end
 			
-			HOLD_STATE: begin 			
-				reg_ready = 1'b1;  
+			HOLD_STATE: begin 		
+			
+				ready_r = 1'b1;  
 				
-            sda_out = 1'b0;
-            scl_out = 1'b0;
+            			sda_out_r = 1'b0;
+            			scl_out_r = 1'b0;
 				
-				if (i_wr_i2c) 
-   				begin
-					cmd_next = i_cmd;
+				if (wr_i2c_i) 
+   			begin
+					cmd_next_r = cmd_i;
 					
-					case (i_cmd) 
+					case (cmd_i) 
 						RESTART_CMD:
-							state_next = RESTART1_STATE;
+							state_next_r = RESTART1_STATE;
 						
 						STOP_CMD:
-							state_next = STOP1_STATE;
+							state_next_r = STOP1_STATE;
 							
 						default: begin
-							bit_next   = 0;
-							state_next = DATA1_STATE;
+							bit_next_r   = 0;
+							state_next_r = DATA1_STATE;
 							
-							tx_next = {i_din, nack}; 
+							tx_next_r = {din_i, nack_w}; 
 							
 						end
 					
@@ -187,49 +193,48 @@ end
 			
 			DATA1_STATE: begin 
 			
-				sda_out = tx_reg[8];
-				scl_out = 1'b0;
+				sda_out_r = tx_r[8];
+				scl_out_r = 1'b0;
 
-            			data_phase = 1'b1;
-				state_next = DATA2_STATE;
+            			data_phase_r = 1'b1;
+				state_next_r = DATA2_STATE;
 				
 			end
 			
 			DATA2_STATE: begin 
-
-				sda_out = tx_reg[8];				
-				data_phase = 1'b1;
+			
+				sda_out_r = tx_r[8];				
+				data_phase_r = 1'b1;
 				
-				state_next = DATA3_STATE;
-				rx_next = {rx_reg[7:0], io_sda}; //shift data in
+				state_next_r = DATA3_STATE;
+				rx_next_r = {rx_r[7:0], sda_io}; 
+				
 			end
 			
 			DATA3_STATE: begin 
 				
-				sda_out = tx_reg[8];	
-				data_phase = 1'b1;
+				sda_out_r = tx_r[8];	
+				data_phase_r = 1'b1;
 				
-				state_next = DATA4_STATE;
+				state_next_r = DATA4_STATE;
 				
 			end
 			
 			DATA4_STATE: begin 
 			
-				sda_out = tx_reg[8];
-            			scl_out = 1'b0;
-
-            			data_phase = 1'b1;
+				sda_out_r = tx_r[8];
+            			scl_out_r = 1'b0;
+            			data_phase_r = 1'b1;
 				
-				if (bit_reg == 8) 
-			   	begin
-					state_next = DATAEND_STATE;
-					
+				if (bit_r == 8) 
+			   begin
+					state_next_r = DATAEND_STATE;					
 				end else 
 				begin
 					
-					tx_next = {tx_reg[7:0], 1'b0};
-					bit_next = bit_reg + 1;
-					state_next = DATA1_STATE;
+					tx_next_r = {tx_r[7:0], 1'b0};
+					bit_next_r = bit_r + 1;
+					state_next_r = DATA1_STATE;
 					
 				end
 			
@@ -237,37 +242,40 @@ end
 			
 			DATAEND_STATE: begin
 			
-				sda_out = 1'b0;
-            			scl_out = 1'b0;
+				sda_out_r = 1'b0;
+            			scl_out_r = 1'b0;
 				
-				state_next = HOLD_STATE;
+				state_next_r = HOLD_STATE;
 				
 			end
 			
 			RESTART1_STATE: begin 
-				scl_out = 1'b0;
-				state_next = RESTART2_STATE;
+			
+				scl_out_r = 1'b0;
+				state_next_r = RESTART2_STATE;
+				
 			end
 			
 			RESTART2_STATE: begin 
-				state_next = START1_STATE;
+				state_next_r = START1_STATE;
 			end
 			
 			STOP1_STATE: begin 
-				sda_out = 1'b0;
-				state_next = STOP2_STATE;
+			
+				sda_out_r = 1'b0;
+				state_next_r = STOP2_STATE;
+				
 			end
 			
 			STOP2_STATE: begin 
-				state_next = STOP3_STATE;
+				state_next_r = STOP3_STATE;
 			end
 			
-			default: begin 	// STOP3 condition
-				state_next = IDLE_STATE;
+			default: begin 								// STOP3 condition
+				state_next_r = IDLE_STATE;
 			end
 			
 		endcase
 	end
 	
 endmodule
-
