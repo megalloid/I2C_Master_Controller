@@ -1,6 +1,8 @@
 # I2C Master Controller
 
-Production-ready I2C мастер-контроллер с интерфейсом AXI4-Lite для интеграции в FPGA-часть Xilinx Zynq SoC.
+Production-ready I2C мастер-контроллер для FPGA с двумя вариантами шинного интерфейса:
+- **AXI4-Lite** — для Xilinx Zynq SoC (ветка `main`)
+- **Avalon-MM** — для Intel Cyclone IV / NIOS II (ветка `cyclone4`)
 
 ## Возможности
 
@@ -16,16 +18,17 @@ Production-ready I2C мастер-контроллер с интерфейсом
 
 ## Архитектура
 
+Ядро `i2c_master_core` — общее для обеих платформ. Шинная обёртка (AXI / Avalon) взаимозаменяема.
+
 ```mermaid
 graph TD
-    PS[Zynq PS / Linux] -->|AXI4-Lite| TOP[i2c_master_top]
-    TOP --> AXI[i2c_master_axi]
-    AXI --> CORE[i2c_master_core]
-    AXI --> SYNC[Синхронизаторы]
-    AXI --> PRE[Прескалер]
-    AXI --> SEQ[Секвенсер]
-    AXI --> IRQ[Прерывания]
-    TOP --> BUF[Tri-state буферы]
+    PS[CPU: ARM / NIOS II] -->|AXI4-Lite или Avalon-MM| WRAP[Обёртка: i2c_master_axi / avalon]
+    WRAP --> CORE[i2c_master_core]
+    WRAP --> SYNC[Синхронизаторы]
+    WRAP --> PRE[Прескалер]
+    WRAP --> SEQ[Секвенсер]
+    WRAP --> IRQ[Прерывания]
+    WRAP --> BUF[Tri-state буферы]
     BUF --> BUS[I2C Bus: SDA/SCL]
 ```
 
@@ -34,19 +37,24 @@ graph TD
 ```
 I2C_Master_Controller/
 ├── rtl/
-│   ├── i2c_master_core.v     # Низкоуровневое I2C ядро (FSM)
-│   ├── i2c_master_axi.v      # AXI4-Lite обёртка (регистры, прескалер, прерывания)
-│   └── i2c_master_top.v      # Top-level с tri-state буферами
+│   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM) — общее
+│   ├── i2c_master_axi.v         # AXI4-Lite обёртка (Zynq)
+│   ├── i2c_master_top.v         # Top-level AXI (Zynq)
+│   ├── i2c_master_avalon.v      # Avalon-MM обёртка (Cyclone IV)
+│   └── i2c_master_top_c4.v      # Top-level Avalon (Cyclone IV)
 ├── tb/
-│   ├── i2c_slave_model.sv    # Модель I2C slave (EEPROM 256 байт)
-│   ├── axi_lite_master_bfm.sv# AXI4-Lite master BFM
-│   └── i2c_master_tb.sv      # Основной тестбенч (10 сценариев)
-├── sim/                       # Артефакты симуляции
+│   ├── i2c_slave_model.sv       # Модель I2C slave (EEPROM 256 байт)
+│   ├── axi_lite_master_bfm.sv   # AXI4-Lite master BFM
+│   ├── i2c_master_tb.sv         # Тестбенч AXI (10 сценариев)
+│   ├── avalon_mm_master_bfm.sv  # Avalon-MM master BFM
+│   └── i2c_master_c4_tb.sv      # Тестбенч Avalon (10 сценариев)
+├── sim/                          # Артефакты симуляции
 ├── doc/
-│   ├── DESIGN.md              # Архитектура и FSM
-│   ├── REGISTERS.md           # Карта регистров
-│   ├── TESTPLAN.md            # План тестирования
-│   └── INTEGRATION.md         # Интеграция в Zynq
+│   ├── DESIGN.md                 # Архитектура и FSM
+│   ├── REGISTERS.md              # Карта регистров
+│   ├── TESTPLAN.md               # План тестирования
+│   ├── INTEGRATION.md            # Интеграция в Zynq
+│   └── INTEGRATION_CYCLONE4.md   # Интеграция в Cyclone IV
 ├── Makefile
 ├── .gitignore
 └── README.md
@@ -62,9 +70,10 @@ I2C_Master_Controller/
 ### Сборка и запуск тестов
 
 ```bash
-make sim        # Компиляция + симуляция
-make lint       # Lint-проверка RTL через Verilator
-make wave       # Генерация VCD для просмотра в GTKWave
+make sim        # Симуляция обоих вариантов (AXI + Avalon)
+make sim-axi    # Только AXI (Zynq) тестбенч
+make sim-c4     # Только Avalon (Cyclone IV) тестбенч
+make lint       # Lint-проверка обоих вариантов
 make clean      # Очистка артефактов
 ```
 
@@ -94,11 +103,15 @@ All tests PASSED
 
 Подробнее: [doc/REGISTERS.md](doc/REGISTERS.md)
 
-## Интеграция в Vivado / Zynq
+## Интеграция
 
+### Xilinx Zynq (AXI4-Lite)
 Контроллер подключается к PS через AXI Interconnect. Прерывание `irq_o` — к GIC через `IRQ_F2P`.
-
 Подробнее: [doc/INTEGRATION.md](doc/INTEGRATION.md)
+
+### Intel Cyclone IV (Avalon-MM)
+Контроллер подключается к NIOS II через Avalon Interconnect в Platform Designer (Qsys).
+Подробнее: [doc/INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md)
 
 ## Документация
 
@@ -108,6 +121,7 @@ All tests PASSED
 | [REGISTERS.md](doc/REGISTERS.md) | Полная карта регистров с битовыми полями |
 | [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
 | [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
+| [INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md) | Интеграция в Cyclone IV, NIOS II, Platform Designer |
 
 ## Лицензия
 
