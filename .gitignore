@@ -27,6 +27,18 @@ webtalk*.xml
 # Verilator
 obj_dir/
 
+# Kernel module build artifacts
+driver/*.o
+driver/*.ko
+driver/*.mod
+driver/*.mod.c
+driver/.*.cmd
+driver/Module.symvers
+driver/modules.order
+driver/.module-common.o.cmd
+driver/.tmp_versions/
+driver/*.dtbo
+
 # Editor / OS
 *.swp
 *~

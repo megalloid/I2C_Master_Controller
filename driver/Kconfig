@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# To use in-tree, add this to drivers/i2c/busses/Kconfig:
+#   source "drivers/i2c/busses/Kconfig.zynq-master"
+# and add to drivers/i2c/busses/Makefile:
+#   obj-$(CONFIG_I2C_ZYNQ_MASTER) += i2c-zynq-master.o
+
+config I2C_ZYNQ_MASTER
+	tristate "Custom I2C Master Controller (Zynq PL)"
+	depends on OF
+	depends on HAS_IOMEM
+	help
+	  Say Y here to enable support for the custom I2C master
+	  controller IP core implemented in the Zynq FPGA fabric (PL).
+
+	  The controller provides Standard Mode (100 kHz), Fast Mode
+	  (400 kHz), and Fast Mode Plus (1 MHz) operation with
+	  clock stretching and arbitration detection.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called i2c-zynq-master.

@@ -34,19 +34,26 @@ graph TD
 ```
 I2C_Master_Controller/
 ├── rtl/
-│   ├── i2c_master_core.v     # Низкоуровневое I2C ядро (FSM)
-│   ├── i2c_master_axi.v      # AXI4-Lite обёртка (регистры, прескалер, прерывания)
-│   └── i2c_master_top.v      # Top-level с tri-state буферами
+│   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM)
+│   ├── i2c_master_axi.v         # AXI4-Lite обёртка (регистры, прескалер, прерывания)
+│   └── i2c_master_top.v         # Top-level с tri-state буферами
 ├── tb/
-│   ├── i2c_slave_model.sv    # Модель I2C slave (EEPROM 256 байт)
-│   ├── axi_lite_master_bfm.sv# AXI4-Lite master BFM
-│   └── i2c_master_tb.sv      # Основной тестбенч (10 сценариев)
-├── sim/                       # Артефакты симуляции
+│   ├── i2c_slave_model.sv       # Модель I2C slave (EEPROM 256 байт)
+│   ├── axi_lite_master_bfm.sv   # AXI4-Lite master BFM
+│   └── i2c_master_tb.sv         # Основной тестбенч (10 сценариев)
+├── driver/
+│   ├── i2c-zynq-master.c        # Linux I2C adapter driver
+│   ├── Makefile                  # Out-of-tree сборка модуля
+│   ├── Kconfig                   # Для in-tree интеграции
+│   ├── custom,i2c-master.yaml   # DT binding документация
+│   └── zynq-i2c-master-overlay.dts # Пример Device Tree overlay
+├── sim/                          # Артефакты симуляции
 ├── doc/
-│   ├── DESIGN.md              # Архитектура и FSM
-│   ├── REGISTERS.md           # Карта регистров
-│   ├── TESTPLAN.md            # План тестирования
-│   └── INTEGRATION.md         # Интеграция в Zynq
+│   ├── DESIGN.md                 # Архитектура и FSM
+│   ├── REGISTERS.md              # Карта регистров
+│   ├── TESTPLAN.md               # План тестирования
+│   ├── INTEGRATION.md            # Интеграция в Zynq
+│   └── DRIVER.md                 # Документация Linux-драйвера
 ├── Makefile
 ├── .gitignore
 └── README.md
@@ -94,6 +101,24 @@ All tests PASSED
 
 Подробнее: [doc/REGISTERS.md](doc/REGISTERS.md)
 
+## Linux-драйвер
+
+В каталоге `driver/` — полноценный Linux I2C adapter driver (`i2c-zynq-master`):
+
+```bash
+cd driver/
+make KERNEL_SRC=/path/to/linux-xlnx ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
+```
+
+После загрузки модуля контроллер становится доступен через стандартные интерфейсы:
+
+```bash
+i2cdetect -y 0       # Сканирование шины
+i2cget -y 0 0x50 0   # Чтение из EEPROM
+```
+
+Подробнее: [doc/DRIVER.md](doc/DRIVER.md)
+
 ## Интеграция в Vivado / Zynq
 
 Контроллер подключается к PS через AXI Interconnect. Прерывание `irq_o` — к GIC через `IRQ_F2P`.
@@ -108,6 +133,7 @@ All tests PASSED
 | [REGISTERS.md](doc/REGISTERS.md) | Полная карта регистров с битовыми полями |
 | [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
 | [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
+| [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter driver: сборка, DT, использование |
 
 ## Лицензия
 
