@@ -39,6 +39,16 @@ driver/.module-common.o.cmd
 driver/.tmp_versions/
 driver/*.dtbo
 
+# Quartus build artifacts
+quartus*/db/
+quartus*/incremental_db/
+quartus*/output_files/
+quartus*/greybox_tmp/
+quartus*/*.qws
+quartus*/*.done
+quartus*/*.summary
+quartus*/*.rpt
+
 # Editor / OS
 *.swp
 *~

@@ -1,6 +1,7 @@
 # I2C Master Controller
 
 Production-ready I2C мастер-контроллер с интерфейсом AXI4-Lite для интеграции в FPGA-часть Xilinx Zynq SoC.
+Включает модуль пакетной записи (`i2c_burst_writer`) для эффективной передачи длинных последовательностей байт (страницы EEPROM, фреймбуфер дисплея и т.д.).
 
 ## Возможности
 
@@ -13,6 +14,7 @@ Production-ready I2C мастер-контроллер с интерфейсом
 - Прерывания: завершение транзакции (DONE) и потеря арбитража (AL)
 - 2-stage синхронизаторы на входах SDA/SCL
 - Составные команды (STA+WR, RD+NACK+STO) через секвенсер
+- **Пакетная запись** (`i2c_burst_writer`): автоматическая передача N байт одной командой
 
 ## Архитектура
 
@@ -36,7 +38,8 @@ I2C_Master_Controller/
 ├── rtl/
 │   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM)
 │   ├── i2c_master_axi.v         # AXI4-Lite обёртка (регистры, прескалер, прерывания)
-│   └── i2c_master_top.v         # Top-level с tri-state буферами
+│   ├── i2c_master_top.v         # Top-level с tri-state буферами
+│   └── i2c_burst_writer.v      # Модуль пакетной I2C записи (START+addr+N bytes+STOP)
 ├── tb/
 │   ├── i2c_slave_model.sv       # Модель I2C slave (EEPROM 256 байт)
 │   ├── axi_lite_master_bfm.sv   # AXI4-Lite master BFM
@@ -53,7 +56,14 @@ I2C_Master_Controller/
 │   ├── REGISTERS.md              # Карта регистров
 │   ├── TESTPLAN.md               # План тестирования
 │   ├── INTEGRATION.md            # Интеграция в Zynq
-│   └── DRIVER.md                 # Документация Linux-драйвера
+│   ├── DRIVER.md                 # Документация Linux-драйвера
+│   └── GUIDE_I2C_MASTER_CORE.md # Подробный гайд по проектированию ядра
+├── quartus_ssd1306/             # Проект: тест SSD1306 OLED на Cyclone IV
+│   ├── src/                     # RTL модули (контроллер SSD1306, дисплей, кнопка)
+│   ├── ssd1306_test.qpf         # Quartus project
+│   ├── ssd1306_test_top.qsf     # Настройки и пины (ALINX AX301)
+│   ├── ssd1306_test_top.sdc     # Тайминг-ограничения
+│   └── README.md
 ├── Makefile
 ├── .gitignore
 └── README.md
@@ -134,6 +144,8 @@ i2cget -y 0 0x50 0   # Чтение из EEPROM
 | [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
 | [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
 | [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter driver: сборка, DT, использование |
+| [GUIDE_I2C_MASTER_CORE.md](doc/GUIDE_I2C_MASTER_CORE.md) | Пошаговый гайд по проектированию I2C ядра |
+| [SSD1306 README](quartus_ssd1306/README.md) | Тест SSD1306 OLED на Cyclone IV |
 
 ## Лицензия
 
