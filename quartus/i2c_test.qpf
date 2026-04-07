@@ -1,0 +1,3 @@
+QUARTUS_VERSION = "22.1"
+DATE = "2026/04/05"
+PROJECT_REVISION = "i2c_test_top"
