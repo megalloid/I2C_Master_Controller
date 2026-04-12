@@ -1,0 +1,42 @@
+transcript on
+if ![file isdirectory verilog_libs] {
+	file mkdir verilog_libs
+}
+
+vlib verilog_libs/altera_ver
+vmap altera_ver ./verilog_libs/altera_ver
+vlog  -work altera_ver {/opt/altera/25.1std/quartus/eda/sim_lib/altera_primitives.v}
+
+vlib verilog_libs/lpm_ver
+vmap lpm_ver ./verilog_libs/lpm_ver
+vlog  -work lpm_ver {/opt/altera/25.1std/quartus/eda/sim_lib/220model.v}
+
+vlib verilog_libs/sgate_ver
+vmap sgate_ver ./verilog_libs/sgate_ver
+vlog  -work sgate_ver {/opt/altera/25.1std/quartus/eda/sim_lib/sgate.v}
+
+vlib verilog_libs/altera_mf_ver
+vmap altera_mf_ver ./verilog_libs/altera_mf_ver
+vlog  -work altera_mf_ver {/opt/altera/25.1std/quartus/eda/sim_lib/altera_mf.v}
+
+vlib verilog_libs/altera_lnsim_ver
+vmap altera_lnsim_ver ./verilog_libs/altera_lnsim_ver
+vlog -sv -work altera_lnsim_ver {/opt/altera/25.1std/quartus/eda/sim_lib/altera_lnsim.sv}
+
+vlib verilog_libs/cycloneive_ver
+vmap cycloneive_ver ./verilog_libs/cycloneive_ver
+vlog  -work cycloneive_ver {/opt/altera/25.1std/quartus/eda/sim_lib/cycloneive_atoms.v}
+
+if {[file exists rtl_work]} {
+	vdel -lib rtl_work -all
+}
+vlib rtl_work
+vmap work rtl_work
+
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src {/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src/ssd1306_test_top.v}
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src {/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src/ssd1306_ctrl.v}
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src {/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src/seg_scan.v}
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src {/home/megalloid/sources/I2C_Master_Controller/quartus_ssd1306/src/ax_debounce.v}
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/rtl {/home/megalloid/sources/I2C_Master_Controller/rtl/i2c_master_core.v}
+vlog  -work work +incdir+/home/megalloid/sources/I2C_Master_Controller/rtl {/home/megalloid/sources/I2C_Master_Controller/rtl/i2c_burst_writer.v}
+

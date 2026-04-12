@@ -1,0 +1,54 @@
+/*
+ * Device Tree overlay for I2C Master Controller on Zynq
+ *
+ * Применение:
+ *   1. Скомпилировать:  dtc -O dtb -o zynq-i2c-master.dtbo zynq-i2c-master-overlay.dts
+ *   2. Скопировать на целевую систему в /lib/firmware/
+ *   3. Применить:       echo zynq-i2c-master.dtbo > /sys/kernel/config/device-tree/overlays/i2c-master/path
+ *      или добавить в boot device tree.
+ *
+ * Адрес (reg) и номер прерывания (interrupts) нужно подставить
+ * из Address Editor в Vivado.
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/amba} {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	i2c_master: i2c@43c00000 {
+		compatible = "custom,i2c-master-1.0";
+		reg = <0x43c00000 0x1c>;
+
+		/*
+		 * IRQ: SPI (Shared Peripheral Interrupt) номер из Vivado.
+		 * GIC SPI 61 = Linux IRQ = 61 + 32 = 93 (в случае Zynq-7000).
+		 * Замените на фактический номер из вашего блок-дизайна.
+		 */
+		interrupt-parent = <&intc>;
+		interrupts = <0 61 4>;  /* GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH */
+
+		clocks = <&clkc 15>;    /* FCLK_CLK0 */
+		clock-frequency = <100000>;  /* 100 kHz Standard Mode */
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* Пример: EEPROM AT24C02 на адресе 0x50 */
+		eeprom@50 {
+			compatible = "atmel,24c02";
+			reg = <0x50>;
+			pagesize = <8>;
+		};
+
+		/* Пример: датчик температуры TMP102 на адресе 0x48 */
+		/*
+		tmp102@48 {
+			compatible = "ti,tmp102";
+			reg = <0x48>;
+		};
+		*/
+	};
+};

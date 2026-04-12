@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/i2c/custom,i2c-master.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Custom I2C Master Controller (Zynq PL)
+
+maintainers:
+  - Megalloid <megalloid@example.com>
+
+description: |
+  I2C master controller IP core for Xilinx Zynq FPGA fabric.
+  Connected via AXI4-Lite slave interface.
+
+allOf:
+  - $ref: /schemas/i2c/i2c-controller.yaml#
+
+properties:
+  compatible:
+    const: custom,i2c-master-1.0
+
+  reg:
+    maxItems: 1
+    description: AXI4-Lite register space (7 registers, 0x1C bytes)
+
+  interrupts:
+    maxItems: 1
+    description: |
+      Combined interrupt line (DONE | AL). Optional; if absent,
+      driver falls back to polling mode.
+
+  clocks:
+    maxItems: 1
+    description: AXI/FCLK clock feeding the controller
+
+  clock-frequency:
+    description: Desired I2C SCL frequency in Hz
+    default: 100000
+    enum: [100000, 400000, 1000000]
+
+  input-clock-frequency:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: |
+      Input clock frequency in Hz. Used only when 'clocks' property
+      is not specified (e.g. when clock framework is not available).
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    i2c@43c00000 {
+        compatible = "custom,i2c-master-1.0";
+        reg = <0x43c00000 0x1c>;
+        interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clkc 15>;  /* FCLK_CLK0 */
+        clock-frequency = <400000>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        eeprom@50 {
+            compatible = "atmel,24c02";
+            reg = <0x50>;
+        };
+    };

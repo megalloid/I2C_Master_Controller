@@ -1,0 +1,67 @@
+# Simulation artifacts
+*.vcd
+*.fst
+*.lxt
+*.lxt2
+*.wlf
+*.ghw
+*.vvp
+a.out
+
+# Vivado
+*.jou
+*.log
+*.str
+*.xpr
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.srcs/
+*.gen/
+.Xil/
+vivado*.zip
+webtalk*.xml
+
+# Verilator
+obj_dir/
+
+# Questa / ModelSim
+sim/questa/work/
+sim/questa/transcript
+sim/questa/modelsim.ini
+sim/questa/vsim.wlf
+sim/questa/*.wlf
+sim/questa/*.vcd
+
+# Kernel module build artifacts
+driver/*.o
+driver/*.ko
+driver/*.mod
+driver/*.mod.c
+driver/.*.cmd
+driver/Module.symvers
+driver/modules.order
+driver/.module-common.o.cmd
+driver/.tmp_versions/
+driver/*.dtbo
+
+# Quartus build artifacts
+quartus*/db/
+quartus*/incremental_db/
+quartus*/output_files/
+quartus*/greybox_tmp/
+quartus*/*.qws
+quartus*/*.done
+quartus*/*.summary
+quartus*/*.rpt
+
+# Editor / OS
+*.swp
+*~
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+doc*/
