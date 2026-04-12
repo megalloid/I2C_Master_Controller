@@ -8,42 +8,67 @@ TB_DIR     := tb
 SIM_DIR    := sim
 QUESTA_DIR := $(SIM_DIR)/questa
 
-RTL_SRC    := $(RTL_DIR)/i2c_master_core.v \
+# Shared core
+CORE_SRC   := $(RTL_DIR)/i2c_master_core.v
+
+# AXI variant (Zynq)
+AXI_SRC    := $(CORE_SRC) \
               $(RTL_DIR)/i2c_master_axi.v \
               $(RTL_DIR)/i2c_master_top.v
 
-TB_SRC     := $(TB_DIR)/i2c_slave_model.sv \
+AXI_TB     := $(TB_DIR)/i2c_slave_model.sv \
               $(TB_DIR)/axi_lite_master_bfm.sv \
               $(TB_DIR)/i2c_master_tb.sv
+
+# Avalon variant (Cyclone IV)
+AVL_SRC    := $(CORE_SRC) \
+              $(RTL_DIR)/i2c_master_avalon.v \
+              $(RTL_DIR)/i2c_master_top_c4.v
+
+AVL_TB     := $(TB_DIR)/i2c_slave_model.sv \
+              $(TB_DIR)/avalon_mm_master_bfm.sv \
+              $(TB_DIR)/i2c_master_c4_tb.sv
 
 # Core-only testbench (no AXI wrapper)
 CORE_RTL   := $(RTL_DIR)/i2c_master_core.v
 CORE_TB    := $(TB_DIR)/i2c_slave_model.sv \
               $(TB_DIR)/i2c_core_tb.sv
 
-SIM_OUT    := $(SIM_DIR)/i2c_master_tb.vvp
-WAVEFORM   := $(SIM_DIR)/i2c_master_tb.vcd
 CORE_OUT   := $(SIM_DIR)/i2c_core_tb.vvp
 CORE_WAVE  := $(SIM_DIR)/i2c_core_tb.vcd
 
-.PHONY: all sim wave sim-core wave-core lint lint-core clean questa questa-gui questa-clean
+.PHONY: all sim sim-axi sim-c4 sim-core wave wave-core lint lint-axi lint-c4 lint-core clean questa questa-gui questa-clean
 
 all: sim
 
 # ---------------------------------------------------------------
-# Icarus Verilog
+# AXI (Zynq)
 # ---------------------------------------------------------------
-sim:
+sim-axi:
 	@mkdir -p $(SIM_DIR)
-	$(IVERILOG) -g2012 -Wall -o $(SIM_OUT) $(RTL_SRC) $(TB_SRC)
-	$(VVP) $(SIM_OUT) -vcd
-	@echo "--- Simulation complete ---"
+	$(IVERILOG) -g2012 -Wall -o $(SIM_DIR)/i2c_master_tb.vvp $(AXI_SRC) $(AXI_TB)
+	cd $(SIM_DIR) && $(VVP) i2c_master_tb.vvp -vcd
+	@echo "--- AXI simulation complete ---"
 
-wave: sim
-	@echo "Open $(WAVEFORM) in GTKWave or other waveform viewer."
+lint-axi:
+	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module i2c_master_top $(AXI_SRC)
+	@echo "--- AXI lint passed ---"
 
 # ---------------------------------------------------------------
-# Icarus Verilog — core-only testbench
+# Avalon (Cyclone IV)
+# ---------------------------------------------------------------
+sim-c4:
+	@mkdir -p $(SIM_DIR)
+	$(IVERILOG) -g2012 -Wall -o $(SIM_DIR)/i2c_master_c4_tb.vvp $(AVL_SRC) $(AVL_TB)
+	cd $(SIM_DIR) && $(VVP) i2c_master_c4_tb.vvp -vcd
+	@echo "--- Cyclone IV simulation complete ---"
+
+lint-c4:
+	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module i2c_master_top_c4 $(AVL_SRC)
+	@echo "--- Cyclone IV lint passed ---"
+
+# ---------------------------------------------------------------
+# Core-only testbench
 # ---------------------------------------------------------------
 sim-core:
 	@mkdir -p $(SIM_DIR)
@@ -55,11 +80,14 @@ wave-core: sim-core
 	@echo "Open $(CORE_WAVE) in GTKWave or other waveform viewer."
 
 # ---------------------------------------------------------------
-# Verilator lint
+# Combined
 # ---------------------------------------------------------------
-lint:
-	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module i2c_master_top $(RTL_SRC)
-	@echo "--- Lint passed ---"
+sim: sim-axi sim-c4
+
+lint: lint-axi lint-c4
+
+wave:
+	@echo "Open $(SIM_DIR)/*.vcd in GTKWave"
 
 lint-core:
 	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module i2c_master_core $(CORE_RTL)

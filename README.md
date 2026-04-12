@@ -1,6 +1,9 @@
 # I2C Master Controller
 
-Production-ready I2C мастер-контроллер с интерфейсом AXI4-Lite для интеграции в FPGA-часть Xilinx Zynq SoC.
+Production-ready I2C мастер-контроллер для FPGA с двумя вариантами шинного интерфейса:
+- **AXI4-Lite** — для Xilinx Zynq SoC
+- **Avalon-MM** — для Intel Cyclone IV / NIOS II
+
 Включает модуль пакетной записи (`i2c_burst_writer`) для эффективной передачи длинных последовательностей байт (страницы EEPROM, фреймбуфер дисплея и т.д.).
 
 ## Возможности
@@ -19,16 +22,17 @@ Production-ready I2C мастер-контроллер с интерфейсом
 
 ## Архитектура
 
+Ядро `i2c_master_core` — общее для обеих платформ. Шинная обёртка (AXI / Avalon) взаимозаменяема.
+
 ```mermaid
 graph TD
-    PS[Zynq PS / Linux] -->|AXI4-Lite| TOP[i2c_master_top]
-    TOP --> AXI[i2c_master_axi]
-    AXI --> CORE[i2c_master_core]
-    AXI --> SYNC[Синхронизаторы]
-    AXI --> PRE[Прескалер]
-    AXI --> SEQ[Секвенсер]
-    AXI --> IRQ[Прерывания]
-    TOP --> BUF[Tri-state буферы]
+    PS[CPU: ARM / NIOS II] -->|AXI4-Lite или Avalon-MM| WRAP[Обёртка: i2c_master_axi / avalon]
+    WRAP --> CORE[i2c_master_core]
+    WRAP --> SYNC[Синхронизаторы]
+    WRAP --> PRE[Прескалер]
+    WRAP --> SEQ[Секвенсер]
+    WRAP --> IRQ[Прерывания]
+    WRAP --> BUF[Tri-state буферы]
     BUF --> BUS[I2C Bus: SDA/SCL]
 ```
 
@@ -37,14 +41,19 @@ graph TD
 ```
 I2C_Master_Controller/
 ├── rtl/
-│   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM)
-│   ├── i2c_master_axi.v         # AXI4-Lite обёртка (регистры, прескалер, прерывания)
-│   ├── i2c_master_top.v         # Top-level с tri-state буферами
+│   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM) — общее
+│   ├── i2c_master_axi.v         # AXI4-Lite обёртка (Zynq)
+│   ├── i2c_master_top.v         # Top-level AXI (Zynq)
+│   ├── i2c_master_avalon.v      # Avalon-MM обёртка (Cyclone IV)
+│   ├── i2c_master_top_c4.v      # Top-level Avalon (Cyclone IV)
 │   └── i2c_burst_writer.v      # Модуль пакетной I2C записи (START+addr+N bytes+STOP)
 ├── tb/
 │   ├── i2c_slave_model.sv       # Модель I2C slave (EEPROM 256 байт)
 │   ├── axi_lite_master_bfm.sv   # AXI4-Lite master BFM
-│   └── i2c_master_tb.sv         # Основной тестбенч (10 сценариев)
+│   ├── i2c_master_tb.sv         # Тестбенч AXI (10 сценариев)
+│   ├── avalon_mm_master_bfm.sv  # Avalon-MM master BFM
+│   ├── i2c_master_c4_tb.sv      # Тестбенч Avalon (10 сценариев)
+│   └── i2c_core_tb.sv           # Тестбенч ядра напрямую (без обёртки)
 ├── driver/
 │   ├── i2c-zynq-master.c        # Linux I2C adapter driver
 │   ├── Makefile                  # Out-of-tree сборка модуля
@@ -75,6 +84,7 @@ I2C_Master_Controller/
 │   ├── TESTPLAN.md               # План тестирования
 │   ├── INTEGRATION.md            # Интеграция в Zynq
 │   ├── DRIVER.md                 # Документация Linux-драйвера
+│   ├── INTEGRATION_CYCLONE4.md   # Интеграция в Cyclone IV
 │   ├── GUIDE_I2C_MASTER_CORE.md # Подробный гайд по проектированию ядра
 │   ├── GUIDE_TESTING.md         # Руководство по тестированию (8 сценариев)
 │   ├── GUIDE_TESTING_CORE.md   # Руководство по тестированию ядра напрямую
@@ -95,10 +105,12 @@ I2C_Master_Controller/
 ### Сборка и запуск тестов (Icarus Verilog)
 
 ```bash
-make sim        # Компиляция + симуляция (iverilog + vvp)
-make lint       # Lint-проверка RTL через Verilator
-make wave       # Генерация VCD для просмотра в GTKWave
-make clean      # Очистка всех артефактов
+make sim        # Симуляция обоих вариантов (AXI + Avalon)
+make sim-axi    # Только AXI (Zynq) тестбенч
+make sim-c4     # Только Avalon (Cyclone IV) тестбенч
+make sim-core   # Тестбенч ядра напрямую (без обёртки)
+make lint       # Lint-проверка обоих вариантов
+make clean      # Очистка артефактов
 ```
 
 ### Симуляция в Questa / ModelSim
@@ -194,11 +206,15 @@ i2cget -y 0 0x50 0   # Чтение из EEPROM
 
 Подробнее: [doc/DRIVER.md](doc/DRIVER.md)
 
-## Интеграция в Vivado / Zynq
+## Интеграция
 
+### Xilinx Zynq (AXI4-Lite)
 Контроллер подключается к PS через AXI Interconnect. Прерывание `irq_o` — к GIC через `IRQ_F2P`.
-
 Подробнее: [doc/INTEGRATION.md](doc/INTEGRATION.md)
+
+### Intel Cyclone IV (Avalon-MM)
+Контроллер подключается к NIOS II через Avalon Interconnect в Platform Designer (Qsys).
+Подробнее: [doc/INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md)
 
 ## Документация
 
@@ -209,6 +225,7 @@ i2cget -y 0 0x50 0   # Чтение из EEPROM
 | [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
 | [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
 | [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter driver: сборка, DT, использование |
+| [INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md) | Интеграция в Cyclone IV, NIOS II, Platform Designer |
 | [GUIDE_I2C_MASTER_CORE.md](doc/GUIDE_I2C_MASTER_CORE.md) | Пошаговый гайд по проектированию I2C ядра |
 | [GUIDE_TESTING.md](doc/GUIDE_TESTING.md) | Подробное руководство по тестированию (8 сценариев) |
 | [GUIDE_TESTING_CORE.md](doc/GUIDE_TESTING_CORE.md) | Тестирование ядра i2c_master_core напрямую (без AXI) |
