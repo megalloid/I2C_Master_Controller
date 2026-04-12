@@ -2,24 +2,23 @@
 // ---------------------------------------------------------------------------
 // SSD1306 OLED Test — top-level for ALINX AX301 (EP4CE6F17C8, 50 MHz)
 //
-// KEY1 (key_start) → static test pattern (single frame)
-// KEY2 (key_anim)  → animated spotlight sweep (press again to stop)
+// Button press → init SSD1306 → send test pattern → show result.
+// I2C shares the bus with on-board EEPROM (different address).
 //
 // LEDs (active-high):
 //   [0] transfer in progress
 //   [1] done OK
 //   [2] error (NACK / arb lost)
-//   [3] animation running
+//   [3] I2C bus busy
 //
 // 7-segment (6 digits, active-low):
-//   Digits 3-1: byte counter (hex)
-//   Digit 0: status indicator
+//   Digits 5-4: phase indicator
+//   Digits 3-0: byte counter (hex)
 // ---------------------------------------------------------------------------
 module ssd1306_test_top (
     input  wire       clk_50m,
     input  wire       rst_n,
     input  wire       key_start,
-    input  wire       key_anim,
 
     inout  wire       i2c_sda,
     inout  wire       i2c_scl,
@@ -31,6 +30,7 @@ module ssd1306_test_top (
 
     // ---------------------------------------------------------------
     // I2C prescaler — 100 kHz SCL from 50 MHz clk
+    // SCL_freq = clk / (4 * (PRE_TOP + 1)) = 50M / (4 * 125) = 100 kHz
     // ---------------------------------------------------------------
     localparam [6:0] PRE_TOP = 7'd124;
 
@@ -77,18 +77,18 @@ module ssd1306_test_top (
     wire scl_s = scl_sync[1];
 
     // ---------------------------------------------------------------
-    // Button debouncers
+    // Button debouncer
     // ---------------------------------------------------------------
-    wire key_start_pulse, key_anim_pulse;
+    wire key_pulse;
 
-    ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_start (
-        .clk_i(clk_50m), .rstn_i(rst_n),
-        .key_i(key_start), .key_pulse_o(key_start_pulse)
-    );
-
-    ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_anim (
-        .clk_i(clk_50m), .rstn_i(rst_n),
-        .key_i(key_anim), .key_pulse_o(key_anim_pulse)
+    ax_debounce #(
+        .CLK_FREQ   (50_000_000),
+        .DEBOUNCE_MS(20)
+    ) u_debounce (
+        .clk_i      (clk_50m),
+        .rstn_i     (rst_n),
+        .key_i      (key_start),
+        .key_pulse_o(key_pulse)
     );
 
     // ---------------------------------------------------------------
@@ -121,7 +121,7 @@ module ssd1306_test_top (
     // ---------------------------------------------------------------
     // SSD1306 Controller
     // ---------------------------------------------------------------
-    wire        ssd_busy, ssd_done, ssd_err, ssd_animating;
+    wire        ssd_busy, ssd_done, ssd_err;
     wire [10:0] ssd_progress;
 
     ssd1306_ctrl #(
@@ -131,13 +131,11 @@ module ssd1306_test_top (
     ) u_ssd (
         .clk_i            (clk_50m),
         .rstn_i           (rst_n),
-        .start_i          (key_start_pulse),
-        .anim_i           (key_anim_pulse),
+        .start_i          (key_pulse),
         .busy_o           (ssd_busy),
         .done_o           (ssd_done),
         .err_o            (ssd_err),
         .progress_o       (ssd_progress),
-        .animating_o      (ssd_animating),
         .cmd_valid_o      (cmd_valid),
         .cmd_o            (cmd),
         .din_o            (din),
@@ -156,14 +154,14 @@ module ssd1306_test_top (
             ssd_done_latch <= 1'b0;
         else if (ssd_done)
             ssd_done_latch <= 1'b1;
-        else if (key_start_pulse || key_anim_pulse)
+        else if (key_pulse)
             ssd_done_latch <= 1'b0;
     end
 
     assign led[0] = ssd_busy;
     assign led[1] = ssd_done_latch;
     assign led[2] = ssd_err;
-    assign led[3] = ssd_animating;
+    assign led[3] = busy;
 
     // ---------------------------------------------------------------
     // 7-segment display — hex byte counter + status
@@ -197,10 +195,8 @@ module ssd1306_test_top (
 
     localparam [7:0] SEG_BLANK = 8'hFF;
     localparam [7:0] SEG_DASH  = 8'hBF;
-    localparam [7:0] SEG_A     = 8'h88;
 
-    wire [7:0] seg_d0 = ssd_err        ? 8'h86 :
-                         ssd_animating  ? SEG_A  :
+    wire [7:0] seg_d0 = ssd_err ? 8'h86 :
                          ssd_done_latch ? seg_hex(4'h0) : SEG_DASH;
     wire [7:0] seg_d1 = seg_hex(ssd_progress[3:0]);
     wire [7:0] seg_d2 = seg_hex(ssd_progress[7:4]);

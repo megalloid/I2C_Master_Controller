@@ -27,6 +27,14 @@ webtalk*.xml
 # Verilator
 obj_dir/
 
+# Questa / ModelSim
+sim/questa/work/
+sim/questa/transcript
+sim/questa/modelsim.ini
+sim/questa/vsim.wlf
+sim/questa/*.wlf
+sim/questa/*.vcd
+
 # Kernel module build artifacts
 driver/*.o
 driver/*.ko
@@ -56,3 +64,4 @@ quartus*/*.rpt
 .idea/
 .DS_Store
 Thumbs.db
+doc*/
