@@ -46,13 +46,13 @@
 
 	chosen {
 		/*
-		 * fbcon=font:VGA8x8 — переключает fbcon на 8x8 (вместо 8x16),
-		 * чтобы на 128x64 OLED помещалось 16x8 = 128 символов вместо 16x4.
-		 * Другие имена (MINI4x6, 6x10, ProFont6x11, 7x14) недоступны,
-		 * т.к. в текущей сборке ядра CONFIG_FONTS=n и включены только
-		 * CONFIG_FONT_8x8 + CONFIG_FONT_8x16.
+		 * fbcon=font:MINI4x6 — самый плотный встроенный fbcon-шрифт.
+		 * На 128x64 OLED даёт 32 колонки x 10 строк = 320 символов.
+		 * Включён в ядре через linux.fragment: CONFIG_FONTS=y +
+		 * CONFIG_FONT_MINI_4x6=y (рядом также CONFIG_FONT_6x10=y для
+		 * возможности переключиться на 21x6 при необходимости).
 		 */
-		bootargs = "console=ttyPS0,115200 earlycon fbcon=font:VGA8x8 root=/dev/mmcblk0p2 rootwait rw";
+		bootargs = "console=ttyPS0,115200 earlycon fbcon=font:MINI4x6 root=/dev/mmcblk0p2 rootwait rw";
 		stdout-path = "serial0:115200n8";
 	};
 

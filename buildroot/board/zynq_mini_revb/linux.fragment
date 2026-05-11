@@ -16,6 +16,16 @@ CONFIG_I2C_HELPER_AUTO=y
 CONFIG_FB=y
 CONFIG_FB_SSD1307=y
 
+# Дополнительные мелкие шрифты для fbcon на 128x64 OLED.
+# CONFIG_FONTS=y превращает FONT_* в явный выбор. Сохраняем 8x8/8x16 из
+# дефолта multi_v7 и добавляем компактные MINI4x6 (32x10 на 128x64) и
+# 6x10 (21x6). Имя для bootargs fbcon=font: ниже в .name каждого шрифта.
+CONFIG_FONTS=y
+CONFIG_FONT_8x8=y
+CONFIG_FONT_8x16=y
+CONFIG_FONT_MINI_4x6=y
+CONFIG_FONT_6x10=y
+
 # AT24 EEPROM (the on-board AT24C02 sits at FPGA_I2C_SCL2/SDA2 — optional)
 CONFIG_EEPROM_AT24=y
 
