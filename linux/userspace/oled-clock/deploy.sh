@@ -5,11 +5,13 @@
 #   bash linux/userspace/oled-clock/deploy.sh                    # залить и запустить (LSB+mmap)
 #   bash linux/userspace/oled-clock/deploy.sh stop               # остановить демон
 #   bash linux/userspace/oled-clock/deploy.sh info               # FBIOGET_*SCREENINFO
-#   bash linux/userspace/oled-clock/deploy.sh test A             # один паттерн (Z,G,A,D,F,T,R,H)
+#   bash linux/userspace/oled-clock/deploy.sh test A             # один паттерн (Z,G,A,D,F,T,R,H,L,B,8,9,P,Q)
 #   bash linux/userspace/oled-clock/deploy.sh test A --msb       # тот же паттерн, MSB-first
 #   bash linux/userspace/oled-clock/deploy.sh test A --no-mmap   # тот же, только write()
 #   bash linux/userspace/oled-clock/deploy.sh run --msb          # запустить часы с MSB-форматом
 #   bash linux/userspace/oled-clock/deploy.sh run --no-mmap      # запустить только через write()
+#   bash linux/userspace/oled-clock/deploy.sh console            # OLED в режим Linux console + getty (USB-клавиатура)
+#   bash linux/userspace/oled-clock/deploy.sh clock              # OLED в режим часов (по умолчанию)
 #   bash linux/userspace/oled-clock/deploy.sh shell '<cmd>'      # выполнить <cmd> на плате
 set -eu
 
@@ -17,6 +19,8 @@ HOST=${OLED_HOST:-root@192.168.2.145}
 PASS=${OLED_PASS:-root}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BIN="$SCRIPT_DIR/oled-clock"
+SWITCH_CLK="$SCRIPT_DIR/oled-clock-start.sh"
+SWITCH_CON="$SCRIPT_DIR/oled-console.sh"
 
 ssh_cmd() {
   sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -35,6 +39,9 @@ ensure_module_and_bin() {
   if [ "${SKIP_UPLOAD:-0}" != 1 ] && [ -x "$BIN" ]; then
     copy_to_remote "$BIN" /usr/local/bin/oled-clock
   fi
+  # Скрипты-переключатели режимов (clock ↔ Linux-console на /dev/fb0).
+  [ -r "$SWITCH_CLK" ] && copy_to_remote "$SWITCH_CLK" /usr/local/bin/oled-clock-start
+  [ -r "$SWITCH_CON" ] && copy_to_remote "$SWITCH_CON" /usr/local/bin/oled-console
 }
 
 case "${1-deploy}" in
@@ -62,6 +69,14 @@ case "${1-deploy}" in
   shell)
     shift
     ssh_cmd "$*"
+    ;;
+  console)
+    ensure_module_and_bin
+    ssh_cmd '/usr/local/bin/oled-console'
+    ;;
+  clock)
+    ensure_module_and_bin
+    ssh_cmd '/usr/local/bin/oled-clock-start'
     ;;
   deploy|"")
     ensure_module_and_bin
