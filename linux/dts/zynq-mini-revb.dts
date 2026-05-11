@@ -45,7 +45,14 @@
 	};
 
 	chosen {
-		bootargs = "console=ttyPS0,115200 earlycon root=/dev/mmcblk0p2 rootwait rw";
+		/*
+		 * fbcon=font:VGA8x8 — переключает fbcon на 8x8 (вместо 8x16),
+		 * чтобы на 128x64 OLED помещалось 16x8 = 128 символов вместо 16x4.
+		 * Другие имена (MINI4x6, 6x10, ProFont6x11, 7x14) недоступны,
+		 * т.к. в текущей сборке ядра CONFIG_FONTS=n и включены только
+		 * CONFIG_FONT_8x8 + CONFIG_FONT_8x16.
+		 */
+		bootargs = "console=ttyPS0,115200 earlycon fbcon=font:VGA8x8 root=/dev/mmcblk0p2 rootwait rw";
 		stdout-path = "serial0:115200n8";
 	};
 
