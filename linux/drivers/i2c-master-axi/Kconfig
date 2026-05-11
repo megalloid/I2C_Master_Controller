@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0+
+config I2C_MASTER_AXI
+	tristate "Custom AXI4-Lite I2C master (i2c_master_axi IP)"
+	depends on OF
+	depends on I2C
+	help
+	  Say Y or M here if you want to use the custom i2c_master_axi
+	  IP shipped with the I2C_Master_Controller project. The driver
+	  exposes a standard Linux i2c_adapter that can host any I2C
+	  client (e.g. ssd1306fb-i2c, at24 EEPROM, …).
+
+	  This option only matters when the driver is integrated into
+	  the kernel tree (drivers/i2c/busses/Kconfig). When built as an
+	  out-of-tree module via Buildroot, see
+	  buildroot/package/i2c-master-axi/.

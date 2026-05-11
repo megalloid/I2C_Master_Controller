@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0+
+# Out-of-tree (M=) build:
+#     make -C $KDIR M=$PWD modules
+#
+# Buildroot pulls this Kbuild via the i2c-master-axi package
+# (see buildroot/package/i2c-master-axi/).
+
+obj-m += i2c-master-axi.o

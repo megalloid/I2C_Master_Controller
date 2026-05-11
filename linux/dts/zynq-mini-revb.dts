@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Device Tree Source for ZYNQ MINI Rev B (xc7z010 / xc7z020 — same package)
+ * with the I2C_Master_Controller PL design.
+ *
+ * Includes:
+ *   - 512 MiB DDR3 (single MT41J256M16RE-125, 16-bit data bus)
+ *   - UART1   (TX=MIO48, RX=MIO49) → /dev/ttyPS0
+ *   - SD0     (MIO40..45)          → mmcblk0  (boot)
+ *   - GEM0    (MIO16..27)          → eth0     (RTL8211E PHY @ MDIO addr 1)
+ *   - USB0    (MIO28..39)          → host
+ *   - QSPI    (MIO1..6 + MIO8)     → spi0
+ *   - PL i2c@43c00000              → i2c-1, with SSD1306 OLED at 0x3C as child
+ *
+ * Build:
+ *   cpp -nostdinc -I <kernel-source>/include -I <kernel-source>/arch/arm/boot/dts \
+ *       -undef -x assembler-with-cpp linux/dts/zynq-mini-revb.dts | \
+ *   dtc -O dtb -o linux/dts/zynq-mini-revb.dtb -
+ *
+ * Buildroot does this automatically (BR2_LINUX_KERNEL_CUSTOM_DTS_PATH).
+ */
+
+/dts-v1/;
+
+/*
+ * Linux 6.5+ переехал DTS-файлы в vendor-подпапки:
+ *   arch/arm/boot/dts/xilinx/zynq-7000.dtsi
+ * Buildroot копирует наш .dts в arch/arm/boot/dts/ (корень), поэтому
+ * include идёт через относительный путь "xilinx/zynq-7000.dtsi".
+ * Если будете билдить под Linux <6.5, замените на "zynq-7000.dtsi".
+ */
+#include "xilinx/zynq-7000.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	model = "ZYNQ MINI Rev B (I2C_Master_Controller)";
+	compatible = "user,zynq-mini-revb", "xlnx,zynq-7000";
+
+	aliases {
+		ethernet0 = &gem0;
+		i2c0      = &i2c_pl;
+		serial0   = &uart1;
+		spi0      = &qspi;
+	};
+
+	chosen {
+		bootargs = "console=ttyPS0,115200 earlycon root=/dev/mmcblk0p2 rootwait rw";
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x20000000>;	/* 512 MiB */
+	};
+
+	cpus {
+		cpu@0 {
+			operating-points = <
+				/* kHz   uV */
+				 666667 1000000
+				 333334  995000
+			>;
+		};
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* PS peripherals                                                     */
+/* ------------------------------------------------------------------ */
+
+&uart1 {
+	status = "okay";
+};
+
+&sdhci0 {
+	status = "okay";
+	bus-width = <4>;
+	xlnx,has-cd = <0x0>;	/* TF1 socket has no Card-Detect line */
+	xlnx,has-power = <0x0>;
+	xlnx,has-wp = <0x0>;
+	broken-cd;
+	disable-wp;
+};
+
+&gem0 {
+	status = "okay";
+	phy-mode = "rgmii-id";
+	phy-handle = <&ethernet_phy>;
+
+	ethernet_phy: ethernet-phy@1 {
+		reg = <1>;
+		device_type = "ethernet-phy";
+	};
+};
+
+&usb0 {
+	status = "okay";
+	dr_mode = "host";
+	usb-phy = <&usb_phy0>;
+};
+
+&qspi {
+	status = "okay";
+	is-dual = <0>;
+	num-cs = <1>;
+	flash@0 {
+		compatible = "winbond,w25q128", "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <100000000>;
+		spi-tx-bus-width = <1>;
+		spi-rx-bus-width = <4>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "boot";
+			reg = <0x0 0x100000>;
+		};
+		partition@100000 {
+			label = "user";
+			reg = <0x100000 0xf00000>;
+		};
+	};
+};
+
+&clkc {
+	ps-clk-frequency = <33333333>;
+	fclk-enable = <0xf>;	/* enable FCLK0..3 */
+};
+
+/ {
+	usb_phy0: usb-phy {
+		compatible = "usb-nop-xceiv";
+		#phy-cells = <0>;
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* PL — i2c_master_axi                                                */
+/* ------------------------------------------------------------------ */
+
+/ {
+	amba_pl: amba_pl@0 {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		i2c_pl: i2c@43c00000 {
+			compatible = "user,i2c-master-axi-1.0";
+			reg = <0x43c00000 0x1000>;
+			interrupt-parent = <&intc>;
+			interrupts = <0 29 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clkc 15>;	/* FCLK0 = 50 MHz */
+			clock-names = "axi";
+			clock-frequency = <100000>;
+			input-clock-frequency = <50000000>;
+
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ssd1306: oled@3c {
+				compatible = "solomon,ssd1306fb-i2c";
+				reg = <0x3c>;
+				solomon,height = <64>;
+				solomon,width  = <128>;
+				solomon,page-offset = <0>;
+				solomon,com-invdir;
+				solomon,prechargep1 = <2>;
+				solomon,prechargep2 = <2>;
+				/*
+				 * COM pin hardware configuration (command 0xDA):
+				 *   Без 'solomon,com-seq'      → Alternative (bit 4 = 1)
+				 *   Без 'solomon,com-lrremap'  → no L/R remap   (bit 5 = 0)
+				 *   → драйвер шлёт 0xDA 0x12 — точно та же
+				 *     последовательность, что используется в рабочих
+				 *     примерах SSD1306 (vitis/ssd1306.c и Verilog
+				 *     ssd1306_ctrl.v).  С 'solomon,com-lrremap' COM-пины
+				 *     0..31 и 32..63 свапаются попарно, что вызывает
+				 *     срезание top/bottom row и «пунктирность» в
+				 *     компактных глифах.
+				 *
+				 * 'solomon,com-invdir' (0xC8) переворачивает Y, чтобы
+				 * визуальный (0,0) совпадал с верхним-левым углом
+				 * физического экрана.
+				 */
+			};
+		};
+	};
+};

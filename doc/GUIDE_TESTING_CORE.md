@@ -1045,9 +1045,709 @@ $display("========================================\n");
 
 ---
 
-## 16. Как запустить
+## 16. Инструменты верификации — подробное описание и how-to
 
-### 16.1. Компиляция и запуск
+В этом разделе — полное описание каждого инструмента, который мы используем при верификации `i2c_master_core`. Для каждого инструмента: что он делает, как устроен внутри, как установить, как запускать, какие ключи важны, и какие грабли поджидают.
+
+### 16.1. Icarus Verilog (iverilog + vvp) — симулятор
+
+#### Что это
+
+Icarus Verilog — open-source симулятор языков Verilog и SystemVerilog. Это наш **основной** инструмент для запуска тестбенчей. Он состоит из двух программ:
+
+- **`iverilog`** — компилятор: читает `.v` / `.sv` файлы и собирает бинарный файл `.vvp`
+- **`vvp`** — runtime-движок: исполняет `.vvp` и генерирует вывод в консоль + файлы осциллограмм (VCD)
+
+```
+  ┌────────────┐     iverilog      ┌────────────┐      vvp       ┌─────────────┐
+  │ .v / .sv   │ ─────────────────►│  .vvp      │ ──────────────►│ Консольный  │
+  │ исходники  │   (компиляция)    │ (байткод)  │  (исполнение)  │ вывод PASS/ │
+  └────────────┘                   └────────────┘                │ FAIL + .vcd │
+                                                                 └─────────────┘
+```
+
+#### Установка
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update
+sudo apt install iverilog
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install iverilog
+```
+
+**macOS (Homebrew):**
+
+```bash
+brew install icarus-verilog
+```
+
+**Из исходников** (для свежей версии):
+
+```bash
+git clone https://github.com/steveicarus/iverilog.git
+cd iverilog
+sh autoconf.sh
+./configure --prefix=/usr/local
+make -j$(nproc)
+sudo make install
+```
+
+Проверка:
+
+```bash
+iverilog -V
+# Icarus Verilog version 12.0 (stable)
+```
+
+#### Ключи iverilog, которые мы используем
+
+| Ключ | Значение | Зачем |
+|------|----------|-------|
+| `-g2012` | Стандарт IEEE 1800-2012 (SystemVerilog) | Наши тестбенчи используют `logic`, `always_ff`, именованные блоки, `begin : label` и другие SV-конструкции |
+| `-Wall` | Все предупреждения | Ловит неподключённые порты, несовпадения ширин, неиспользуемые сигналы |
+| `-o <file>` | Выходной файл `.vvp` | Куда положить скомпилированный байткод |
+
+Полная команда для нашего ядра:
+
+```bash
+iverilog -g2012 -Wall -o sim/i2c_core_tb.vvp \
+    rtl/i2c_master_core.v \
+    tb/i2c_slave_model.sv \
+    tb/i2c_core_tb.sv
+```
+
+Порядок файлов **важен**: RTL перед тестбенчем, иначе компилятор может не найти модули, на которые ссылается тестбенч.
+
+#### Ключи vvp
+
+| Ключ | Значение |
+|------|----------|
+| (без ключей) | Просто запустить `.vvp` |
+| `-vcd` | Принудительно включить VCD-дамп (даже если `$dumpfile`/`$dumpvars` не вызваны в коде) |
+| `-lxt2` | Дамп в формате LXT2 (компактнее VCD) |
+
+Запуск:
+
+```bash
+cd sim && vvp ../sim/i2c_core_tb.vvp
+```
+
+Почему `cd sim`? Потому что `$dumpfile("i2c_core_tb.vcd")` в тестбенче создаёт файл **относительно текущей директории**. Если запускать из корня проекта, VCD окажется в корне, а не в `sim/`.
+
+#### Типичные ошибки и решения
+
+| Ошибка | Причина | Решение |
+|--------|---------|---------|
+| `Unknown module type: i2c_master_core` | Модуль RTL не передан компилятору | Добавить `.v` файл в командную строку `iverilog` |
+| `error: reg ack; is not allowed in SystemVerilog` | Используется `-g2005` или не указан `-g2012` | Добавить `-g2012` |
+| `warning: Port X of Y is not connected` | Порт не подключён в инстанциации | Подключить или явно указать `.port()` (пустой) |
+| VCD-файл пустой | `$dumpfile`/`$dumpvars` не вызваны | Добавить в тестбенч (см. раздел 16.5) |
+| Симуляция «зависает» | Бесконечный цикл без `$finish` | Добавить watchdog (см. раздел 14) |
+
+#### Ограничения Icarus Verilog
+
+- Поддержка SystemVerilog **неполная**: нет `interface`, `class`, `randomize`, `covergroup`, `assertion` с `property`. Для нашего проекта это не проблема — мы используем только процедурный стиль.
+- Производительность ниже коммерческих симуляторов (Questa, VCS) в 10–100 раз на больших дизайнах. Для нашего ядра (~700 строк RTL) это незаметно.
+- Нет встроенного wave-viewer — нужен GTKWave или аналог.
+
+---
+
+### 16.2. Verilator — статический анализ (lint)
+
+#### Что это
+
+Verilator — open-source инструмент двойного назначения:
+1. **Lint** — статический анализ Verilog/SystemVerilog без симуляции
+2. **Симулятор** — компилирует RTL в C++/SystemC для очень быстрой симуляции
+
+В нашем проекте мы используем **только lint-режим**. Verilator проверяет синтаксис, стилистику, ширины сигналов, мёртвый код и десятки других потенциальных проблем — **без запуска симуляции**.
+
+```
+  ┌────────────┐    verilator --lint-only    ┌──────────────────┐
+  │ .v / .sv   │ ──────────────────────────► │ Список warnings  │
+  │ RTL файлы  │                             │ и errors         │
+  └────────────┘                             └──────────────────┘
+```
+
+#### Установка
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update
+sudo apt install verilator
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install verilator
+```
+
+**macOS (Homebrew):**
+
+```bash
+brew install verilator
+```
+
+**Из исходников** (для свежей версии):
+
+```bash
+git clone https://github.com/verilator/verilator.git
+cd verilator
+git checkout stable
+autoconf
+./configure --prefix=/usr/local
+make -j$(nproc)
+sudo make install
+```
+
+Проверка:
+
+```bash
+verilator --version
+# Verilator 5.020 2024-01-01
+```
+
+#### Как мы используем
+
+```bash
+verilator --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module i2c_master_core \
+    rtl/i2c_master_core.v
+```
+
+| Ключ | Значение |
+|------|----------|
+| `--lint-only` | Только проверка, без генерации C++ |
+| `-Wall` | Включить все предупреждения |
+| `-Wno-UNUSEDSIGNAL` | Подавить предупреждения о неиспользуемых сигналах (часто ложные в RTL с конфигурируемыми параметрами) |
+| `--top-module <name>` | Явно указать top-level модуль (иначе Verilator пытается угадать и может ошибиться) |
+
+#### Какие ошибки ловит Verilator, а Icarus — нет
+
+| Категория | Пример | Verilator Warning |
+|-----------|--------|-------------------|
+| Несовпадение ширин | `wire [7:0] a = b[3:0];` без явного расширения | `WIDTHEXPAND`, `WIDTHTRUNC` |
+| Защёлки (latches) | `always_comb` без покрытия всех веток | `LATCH` |
+| Комбинаторные петли | `assign a = b; assign b = a;` | `UNOPTFLAT` |
+| Неиспользуемые биты | `wire [7:0] x; ... = x[3:0];` — верхние 4 бита мертвы | `UNUSEDSIGNAL` |
+| Знаковые ошибки | Смешивание `signed`/`unsigned` в арифметике | `WIDTHEXPAND` |
+
+#### Рекомендация: запускать lint перед каждой симуляцией
+
+```bash
+make lint-core && make sim-core
+```
+
+Это занимает менее секунды и часто экономит минуты отладки.
+
+---
+
+### 16.3. GTKWave — просмотр осциллограмм
+
+#### Что это
+
+GTKWave — open-source вьюер файлов осциллограмм (VCD, LXT, LXT2, FST, GHW). Это графическое приложение, в котором можно рассмотреть каждый сигнал по тактам — аналог логического анализатора, только для симуляции.
+
+```
+  ┌─────────────┐     GTKWave      ┌──────────────────────────────────┐
+  │ .vcd файл   │ ───────────────► │ Графическое окно с временными    │
+  │ (из vvp)    │                  │ диаграммами всех сигналов        │
+  └─────────────┘                  └──────────────────────────────────┘
+```
+
+#### Установка
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update
+sudo apt install gtkwave
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install gtkwave
+```
+
+**macOS (Homebrew):**
+
+```bash
+brew install --cask gtkwave
+```
+
+Проверка:
+
+```bash
+gtkwave --version
+# GTKWave Analyzer v3.3.116
+```
+
+#### Запуск
+
+```bash
+gtkwave sim/i2c_core_tb.vcd
+```
+
+Если VCD-файл ещё не создан — сначала выполните `make sim-core`.
+
+#### Интерфейс GTKWave — пошаговое руководство
+
+После запуска откроется окно с тремя основными панелями:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Меню:  File  Edit  Search  Time  Markers  View  Help       │
+├──────────────┬───────────────────────────────────────────────┤
+│              │                                               │
+│  Signal      │          Waveform Area                        │
+│  Search      │          (временные диаграммы)                │
+│  Tree (SST)  │                                               │
+│              │  clk     ┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐      │
+│  ─ TOP       │  sda     ──┐     ┌──────┐     ┌──            │
+│    ─ dut     │  scl     ──┐  ┌──┘      └──┐  └──            │
+│    ─ slave   │  state   ══╤══╤══════════╤══╤════             │
+│              │  ready   ──┘  └──────────┘  └──               │
+│              │                                               │
+│  [Append]    │  ◄─── 0ns ──── 500ns ──── 1000ns ───►        │
+│  [Insert]    │                                               │
+├──────────────┴───────────────────────────────────────────────┤
+│  Статусная строка: Time= 234.5ns  Marker= ...               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Пошаговые действия:**
+
+1. **Добавить сигналы.** В левой панели (SST — Signal Search Tree) раскройте иерархию: `i2c_core_tb` → `dut` → интересующие сигналы. Выделите сигнал и нажмите **Append** (или перетащите мышью в область диаграмм).
+
+2. **Навигация по времени:**
+   - Колёсико мыши — масштаб (zoom in/out)
+   - Средняя кнопка (drag) — перемещение по времени
+   - Клавиши `+` / `-` — zoom in / zoom out
+   - `Ctrl+Home` / `Ctrl+End` — начало / конец симуляции
+
+3. **Маркеры.** Клик левой кнопкой в области диаграмм ставит **основной маркер** (жёлтая вертикальная линия). Время маркера показано в статусной строке. Это удобно для измерения длительности — поставьте маркер на начало бита, затем на конец, и посмотрите разницу.
+
+4. **Формат отображения.** Правый клик на имени сигнала → **Data Format**:
+   - `Hex` — для данных (`tx_shift_r`, `dout_o`)
+   - `Unsigned Decimal` — для счётчиков (`bit_cnt_r`, `phase_r`)
+   - `Binary` — для побитового анализа
+   - `ASCII` — для отладки строковых данных
+
+5. **Группировка.** Выделите несколько сигналов → правый клик → **Combine Down** — объединение в группу. Удобно для шины (SDA + SCL) или FSM (state + phase + bit_cnt).
+
+6. **Поиск переходов.** Выберите сигнал, затем:
+   - `→` (стрелка вправо) — следующий переход (фронт)
+   - `←` (стрелка влево) — предыдущий переход
+   - Быстрый поиск конкретного значения: **Edit → Find Value** → введите значение
+
+7. **Сохранение конфигурации.** После настройки сигналов: **File → Write Save File** → `core_debug.gtkw`. В следующий раз откройте так:
+
+```bash
+gtkwave sim/i2c_core_tb.vcd core_debug.gtkw
+```
+
+GTKWave восстановит все добавленные сигналы, их порядок, форматы и масштаб.
+
+#### Рекомендуемый набор сигналов
+
+Добавьте сигналы в следующем порядке (сверху вниз) для максимально удобного анализа:
+
+| # | Группа | Сигналы | Формат | Зачем |
+|---|--------|---------|--------|-------|
+| 1 | Шина | `scl`, `sda` | Bit | Физическая картина I2C |
+| 2 | Управление | `ena`, `cmd_valid`, `cmd`, `din` | cmd: Unsigned, din: Hex | Что подаёт тестбенч |
+| 3 | Результат | `ready`, `dout`, `rx_ack` | dout: Hex | Что отвечает ядро |
+| 4 | Статус | `busy`, `arb_lost` | Bit | Глобальное состояние |
+| 5 | FSM | `dut.state_r`, `dut.phase_r`, `dut.bit_cnt_r` | Unsigned | Внутренности автомата |
+| 6 | Сдвиговые | `dut.tx_shift_r`, `dut.rx_shift_r` | Binary | Побитовая передача/приём |
+| 7 | Open-drain | `dut.scl_oen_o`, `dut.sda_oen_o` | Bit | Кто тянет линии |
+| 8 | Slave | `slave.state`, `slave.sr`, `slave.bcnt` | state: Unsigned, sr: Hex | Поведение slave-модели |
+| 9 | Stretching | `scl_hold`, `stretch_cnt`, `slave_str.state` | Unsigned | Диагностика clock stretching |
+| 10 | Арбитраж | `ext_sda_drive` | Bit | Внешний интерферер |
+
+#### Приёмы отладки в GTKWave
+
+**Проверка одного бита I2C:**
+
+Один бит на шине = 4 фазы `ena`. В GTKWave это выглядит так:
+
+```
+ena:      _│‾│__│‾│__│‾│__│‾│_
+phase_r:   0       1       2       3
+scl:      ──LOW───HIGH──HIGH──LOW──
+sda:       data    sample  hold   shift
+```
+
+Если `phase_r` «залипает» на значении 1 — это clock stretching (SCL удерживается slave).
+
+**Проверка START-условия:**
+
+Ищите момент, когда `sda` падает с 1 → 0 при `scl` = 1. В GTKWave: поставьте маркер на falling edge `sda`, убедитесь, что `scl` в этот момент HIGH.
+
+**Проверка STOP-условия:**
+
+`sda` поднимается с 0 → 1 при `scl` = 1. Rising edge SDA при SCL = HIGH.
+
+---
+
+### 16.4. Verilator как lint в связке с Make
+
+В `Makefile` проекта lint-проверка вынесена в отдельные цели:
+
+```bash
+# Lint только ядра
+make lint-core
+
+# Lint всех вариантов (AXI + Avalon)
+make lint
+```
+
+Под капотом `lint-core` выполняет:
+
+```bash
+verilator --lint-only -Wall -Wno-UNUSEDSIGNAL \
+    --top-module i2c_master_core rtl/i2c_master_core.v
+```
+
+При успехе — тишина и `--- Core lint passed ---`. При ошибках — список предупреждений/ошибок с номерами строк:
+
+```
+%Warning-WIDTHTRUNC: rtl/i2c_master_core.v:142:15: Operator ASSIGN expects 8 bits
+                     on the Assign RHS, but Assign RHS's VARREF 'cnt' produces 32 bits.
+                     ... Suggest zero-extend to fix ...
+```
+
+Каждое предупреждение содержит: категорию (`WIDTHTRUNC`), файл, строку, и часто — совет по исправлению.
+
+---
+
+### 16.5. VCD-дамп — как устроен и как настроить
+
+#### Что такое VCD
+
+VCD (Value Change Dump) — текстовый формат записи изменений сигналов во времени. Это стандарт IEEE 1364 (Verilog). Каждая строка — момент изменения одного сигнала. Файл может быть очень большим для сложных дизайнов, но для нашего ядра (~40 мс модельного времени) — обычно несколько МБ.
+
+#### Как включить VCD в тестбенче
+
+В `i2c_core_tb.sv` уже есть:
+
+```verilog
+initial begin
+    $dumpfile("i2c_core_tb.vcd");   // Имя файла
+    $dumpvars(0, i2c_core_tb);      // Записывать ВСЕ сигналы в иерархии
+end
+```
+
+Аргумент `$dumpvars`:
+
+| Вызов | Что записывает |
+|-------|----------------|
+| `$dumpvars(0, i2c_core_tb)` | Все сигналы на всех уровнях иерархии (рекурсивно) |
+| `$dumpvars(1, i2c_core_tb)` | Только сигналы верхнего уровня тестбенча |
+| `$dumpvars(0, dut)` | Только сигналы внутри DUT |
+| `$dumpvars(2, dut)` | DUT + один уровень вглубь |
+
+Для отладки рекомендуем `(0, i2c_core_tb)` — полная видимость, включая slave-модели. Если VCD слишком большой — ограничьте глубину или модуль.
+
+#### Альтернативы VCD: FST
+
+Для больших дизайнов VCD может занимать гигабайты. FST — бинарный формат, в 10–50 раз компактнее:
+
+```verilog
+initial begin
+    $dumpfile("i2c_core_tb.fst");
+    $dumpvars(0, i2c_core_tb);
+end
+```
+
+GTKWave поддерживает FST «из коробки». При запуске через `vvp` нужно добавить:
+
+```bash
+vvp sim/i2c_core_tb.vvp -fst
+```
+
+---
+
+### 16.6. Questa / ModelSim (опционально)
+
+#### Что это
+
+Questa (ранее ModelSim) — коммерческий симулятор от Siemens EDA. Он значительно быстрее Icarus Verilog, имеет встроенный wave-viewer и полную поддержку SystemVerilog (включая OOP, assertions, coverage). В нашем проекте Questa — **опциональный** инструмент для тех, у кого есть лицензия.
+
+#### Когда нужен Questa вместо Icarus
+
+| Ситуация | Icarus | Questa |
+|----------|--------|--------|
+| Базовая симуляция ядра (наш случай) | Достаточно | Избыточно |
+| Полная система (AXI + прерывания + DMA) | Медленно, но работает | Быстрее в 10–50 раз |
+| SystemVerilog Assertions (`assert property`) | Не поддерживает | Полная поддержка |
+| Functional Coverage (`covergroup`) | Не поддерживает | Полная поддержка |
+| UVM-тестбенч | Не поддерживает | Полная поддержка |
+
+#### Структура скриптов Questa в проекте
+
+```
+sim/questa/
+├── compile.do       # Компиляция RTL + TB
+├── run_batch.do     # Запуск без GUI
+├── run_gui.do       # Запуск с GUI + wave viewer
+└── wave.do          # Конфигурация волнового окна
+```
+
+#### Запуск Questa (при наличии лицензии)
+
+**Batch-режим** (без GUI — для CI/регрессий):
+
+```bash
+make questa
+```
+
+Под капотом:
+
+```bash
+cd sim/questa && vsim -c -do "do run_batch.do"
+```
+
+Что происходит:
+1. `run_batch.do` вызывает `compile.do` — компиляция через `vlog`
+2. `vsim -c` — запуск симуляции в консольном режиме
+3. `-voptargs="+acc"` — полный доступ к иерархии сигналов
+4. `-t 1ps` — разрешение по времени 1 пикосекунда
+5. `run -all` — запуск до `$finish`
+6. `quit -f` — выход
+
+**GUI-режим** (с wave viewer):
+
+```bash
+make questa-gui
+```
+
+Под капотом:
+
+```bash
+cd sim/questa && vsim -do "do run_gui.do"
+```
+
+Отличие от batch: `run_gui.do` загружает `wave.do` — конфигурацию волнового окна с группами сигналов (System, I2C Bus, Core FSM, Core I/O, Slave Model, AXI Regs, Sequencer).
+
+**Очистка артефактов:**
+
+```bash
+make questa-clean
+```
+
+Удаляет `work/`, `transcript`, `vsim.wlf`, `modelsim.ini`.
+
+---
+
+### 16.7. Make — оркестрация
+
+#### Зачем нужен Makefile
+
+Вместо запоминания длинных команд `iverilog ... vvp ...` мы используем `make`. Одна команда — один осмысленный шаг:
+
+```bash
+make sim-core       # Скомпилировать и запустить тесты ядра
+make lint-core      # Lint ядра через Verilator
+make wave-core      # Скомпилировать, запустить, подсказать как открыть VCD
+make sim            # Все симуляции (AXI + Avalon)
+make lint           # Все lint-проверки
+make clean          # Удалить все артефакты
+```
+
+#### Полная карта целей Makefile
+
+```
+                    ┌─────────┐
+                    │   all   │
+                    └────┬────┘
+                         │
+                    ┌────┴────┐
+                    │   sim   │
+                    └────┬────┘
+                    ┌────┴────┐
+              ┌─────┤         ├─────┐
+              │     └─────────┘     │
+         ┌────┴────┐          ┌─────┴───┐
+         │ sim-axi │          │ sim-c4  │
+         └─────────┘          └─────────┘
+
+  ┌──────────┐  ┌───────────┐  ┌──────────┐
+  │ sim-core │  │ lint-core │  │wave-core │
+  └──────────┘  └───────────┘  └──────────┘
+
+  ┌────────┐  ┌──────────┐  ┌───────────┐  ┌───────────────┐
+  │  lint  │  │  questa  │  │questa-gui │  │ questa-clean  │
+  └───┬────┘  └──────────┘  └───────────┘  └───────────────┘
+  ┌───┴────┐
+  │lint-axi│
+  │lint-c4 │
+  └────────┘
+
+  ┌────────┐
+  │ clean  │ ← удаляет *.vvp, *.vcd, *.fst, obj_dir, questa artifacts
+  └────────┘
+```
+
+#### Переменные окружения
+
+В `Makefile` инструменты задаются через `?=` — можно переопределить извне:
+
+```bash
+# Использовать другой путь к iverilog
+IVERILOG=/opt/iverilog-13/bin/iverilog make sim-core
+
+# Использовать другой симулятор Questa
+VSIM=/opt/questa/2024.1/bin/vsim make questa
+```
+
+#### Типовой workflow
+
+```bash
+# 1. Lint — проверить синтаксис за <1 секунды
+make lint-core
+
+# 2. Симуляция — запустить тесты
+make sim-core
+
+# 3. Если FAIL — открыть осциллограммы
+gtkwave sim/i2c_core_tb.vcd
+
+# 4. Исправить RTL, повторить с шага 1
+
+# 5. Всё зелёное — очистить артефакты
+make clean
+```
+
+---
+
+### 16.8. Компиляция и запуск — полный пример от начала до конца
+
+Допустим, вы только что клонировали репозиторий. Вот последовательность действий:
+
+#### Шаг 1: Убедиться, что инструменты установлены
+
+```bash
+iverilog -V | head -1
+# Icarus Verilog version 12.0 (stable)
+
+verilator --version
+# Verilator 5.020 2024-01-01
+
+which gtkwave
+# /usr/bin/gtkwave
+```
+
+Если чего-то нет — см. инструкции по установке выше.
+
+#### Шаг 2: Lint
+
+```bash
+make lint-core
+```
+
+Ожидаемый вывод:
+
+```
+--- Core lint passed ---
+```
+
+Если есть ошибки — исправьте их до перехода к симуляции.
+
+#### Шаг 3: Симуляция
+
+```bash
+make sim-core
+```
+
+Ожидаемый вывод (полный):
+
+```
+=== TEST 1: Single WRITE + ACK ===
+  PASS: Slave ACK received (rx_ack_o = 0)
+
+=== TEST 2: Single READ + NACK ===
+  PASS: Read 0xA5 matches written value
+
+=== TEST 3: Full transaction ===
+  PASS: Full transaction OK, busy cleared
+
+=== TEST 4: Repeated START (RESTART) ===
+  PASS: RESTART read-back OK
+
+=== TEST 5: NACK from slave ===
+  PASS: Got NACK for nonexistent address 0x3F
+  PASS: Normal ACK after NACK recovery
+
+=== TEST 6: Clock stretching ===
+  PASS: Clock stretching handled OK
+
+=== TEST 7: Arbitration lost ===
+  PASS: Arbitration lost detected
+  PASS: Bus released after arb_lost
+  PASS: Core ignores commands while arb_lost=1
+  PASS: arb_lost cleared
+
+=== TEST 8: Reset during transaction ===
+  PASS: Post-reset write/read OK
+
+=== TEST 9: CMD_NOP ===
+  PASS: NOP: state stayed IDLE, ready=1
+
+=== TEST 10: Sequential read (4 bytes) ===
+  PASS: Sequential read 00,01,02,03 OK
+
+========================================
+  TEST SUMMARY:  PASS=14  FAIL=0
+  All tests PASSED
+========================================
+--- Core simulation complete ---
+```
+
+#### Шаг 4: Анализ осциллограмм (при необходимости)
+
+```bash
+gtkwave sim/i2c_core_tb.vcd &
+```
+
+1. В дереве сигналов (SST) раскройте `i2c_core_tb` → `dut`
+2. Добавьте `scl`, `sda`, `state_r`, `phase_r`, `bit_cnt_r`
+3. Нажмите `Ctrl+Home` для перехода в начало, `+` для увеличения масштаба
+4. Найдите первый START: falling edge SDA при SCL=HIGH
+
+#### Шаг 5: Очистка
+
+```bash
+make clean
+```
+
+Удалит `sim/*.vvp`, `sim/*.vcd`, `sim/*.fst`, `obj_dir/`.
+
+---
+
+### 16.9. Сводная таблица инструментов
+
+| Инструмент | Версия в проекте | Назначение | Make-цель | Обязателен? |
+|------------|-----------------|------------|-----------|-------------|
+| Icarus Verilog (`iverilog` + `vvp`) | 12.0 | Компиляция и симуляция | `sim-core` | Да |
+| Verilator | 5.020 | Статический анализ (lint) | `lint-core` | Рекомендуется |
+| GTKWave | 3.3.116 | Просмотр осциллограмм VCD/FST | `wave-core` (подсказка) | Рекомендуется |
+| Questa / ModelSim | — | Коммерческая симуляция + coverage | `questa`, `questa-gui` | Нет (опционально) |
+| GNU Make | — | Оркестрация сборки | все цели | Да |
+
+---
+
+## 17. Как запустить
+
+### 17.1. Компиляция и запуск
 
 ```bash
 make sim-core
@@ -1064,34 +1764,19 @@ iverilog -g2012 -Wall -o sim/i2c_core_tb.vvp \
 cd sim && vvp ../sim/i2c_core_tb.vvp
 ```
 
-### 16.2. Lint-проверка ядра
+### 17.2. Lint-проверка ядра
 
 ```bash
 make lint-core
 ```
 
-### 16.3. Просмотр осциллограмм
+### 17.3. Просмотр осциллограмм
 
 ```bash
 gtkwave sim/i2c_core_tb.vcd
 ```
 
-### 16.4. Рекомендуемый набор сигналов для GTKWave
-
-| Группа | Сигналы |
-|--------|---------|
-| Шина | `sda`, `scl` |
-| Управление | `cmd_valid`, `cmd`, `din`, `ready`, `ena` |
-| Результат | `dout`, `rx_ack` |
-| Статус | `busy`, `arb_lost` |
-| FSM (DUT) | `dut.state_r`, `dut.phase_r`, `dut.bit_cnt_r` |
-| Сдвиговые | `dut.tx_shift_r`, `dut.rx_shift_r` |
-| Open-drain | `dut.scl_oen_o`, `dut.sda_oen_o` |
-| Slave | `slave.state`, `slave.sr`, `slave.bcnt`, `slave.sda_out_en` |
-| Stretching | `scl_hold`, `stretch_cnt`, `slave_str.state` |
-| Арбитраж | `ext_sda_drive`, `arb_lost` |
-
-### 16.5. Ожидаемый вывод
+### 17.4. Ожидаемый вывод
 
 ```
 === TEST 1: Single WRITE + ACK ===
@@ -1136,7 +1821,7 @@ gtkwave sim/i2c_core_tb.vcd
 
 ---
 
-## 17. Что дальше
+## 18. Что дальше
 
 После того как все 10 тестов проходят — ядро `i2c_master_core` можно считать проверенным на базовом уровне. Можно переходить к следующему шагу проектирования:
 

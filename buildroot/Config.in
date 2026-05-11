@@ -1,0 +1,5 @@
+menu "ZYNQ MINI Rev B (I2C Master Controller)"
+
+source "$BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH/package/i2c-master-axi/Config.in"
+
+endmenu

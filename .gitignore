@@ -64,4 +64,30 @@ quartus*/*.rpt
 .idea/
 .DS_Store
 Thumbs.db
-doc*/
+
+# Backup files
+*.bak
+
+# Buildroot — внешний source-tree и build-output (десятки гигабайт)
+buildroot-build/
+buildroot-src/
+
+# Quartus simulation netlist (auto-generated, очень крупный)
+quartus*/simulation/**/*.vo
+quartus*/simulation/**/*.sdo
+
+# Vitis IDE workspace — IDE state и platform-кеш не нужны в репо
+vitis/workspace/_ide/
+vitis/workspace/zynq_mini_oled_platform/
+vitis/workspace/*/Debug/
+vitis/workspace/*/Release/
+vitis/workspace/.metadata/
+
+# Vivado — генерёные проектные файлы / логи
+vivado/proj/
+vivado/build.log
+vivado/*.jou
+
+# Userspace build outputs
+linux/userspace/*/oled-clock
+linux/userspace/*/*.o

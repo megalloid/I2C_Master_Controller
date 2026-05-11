@@ -1,0 +1,70 @@
+# U-Boot config fragment merged on top of xilinx_zynq_virt_defconfig.
+# These knobs match the SD-card boot scenario described in
+# board/zynq_mini_revb/uEnv.txt.
+
+# --- Host-tools (mkimage / kwbimage / image-host) -----------------------
+# В U-Boot 2024.01:
+#   * `config TOOLS_FIT` объявлен `def_bool y` и НЕ отключаем через
+#     kconfig fragment.
+#   * `tools/kwbimage.c` безусловно подключает <openssl/*.h> и зовёт
+#     EVP_*/RSA_*/PEM_*/X509_* — без ifdef-защиты.
+#   * `tools/image-host.c` тоже включает <openssl/pem.h> и <openssl/evp.h>
+#     на верхнем уровне.
+# Поэтому единственный рабочий путь — иметь `CONFIG_TOOLS_LIBCRYPTO=y`,
+# чтобы tools/Makefile подсунул `-lcrypto` от host-openssl
+# (Buildroot собирает его благодаря BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+# в defconfig). Все попытки выключить TOOLS_LIBCRYPTO ломают линковку.
+CONFIG_TOOLS_LIBCRYPTO=y
+CONFIG_TOOLS_FIT_SIGNATURE=y
+
+# --- EFI-специфичные тулзы выключаем ------------------------------------
+# Их можно безопасно отключить: они выбираемы (не def_bool y), и нам
+# для SD-загрузки uImage не нужны.
+# CONFIG_TOOLS_MKEFICAPSULE is not set
+# CONFIG_EFI_LOADER is not set
+# CONFIG_EFI_HTTP_BOOT is not set
+# CONFIG_EFI_SECURE_BOOT is not set
+# CONFIG_EFI_CAPSULE_ON_DISK is not set
+# CONFIG_EFI_CAPSULE_FIRMWARE_MANAGEMENT is not set
+# CONFIG_EFI_CAPSULE_FIRMWARE_FIT is not set
+# CONFIG_EFI_CAPSULE_FIRMWARE_RAW is not set
+# CONFIG_EFI_CAPSULE_AUTHENTICATE is not set
+
+# --- DTB packaging ------------------------------------------------------
+# При SD-boot legacy-FSBL прыгает в U-Boot, но НЕ устанавливает r2 на DTB.
+# По умолчанию U-Boot собран с CONFIG_OF_BOARD=y и просит указатель из r2 —
+# и молча падает в hang() ещё до banner-а. На JTAG-сценарии мы регистр r2
+# выставляем руками, а в SD-сценарии — нет. Лечим встраиванием DTB прямо
+# в u-boot.elf (CONFIG_OF_EMBED=y), и тогда r2 не нужен вовсе.
+CONFIG_OF_EMBED=y
+# CONFIG_OF_SEPARATE is not set
+# CONFIG_OF_BOARD is not set
+
+# --- Distro/SD boot ----------------------------------------------------
+# Autoboot:
+#   * BOOTDELAY=1 — секунда на прерывание (раньше 2 — пользователь успевал
+#     случайно нажать клавишу в терминале и сваливался в prompt).
+#   * Bootcmd добавляет `mmc rescan` для надёжности: после нашего фикса
+#     FSBL контроллер сбрасывается, но первый mmc dev может потребовать
+#     повторного rescan.
+#   * Сложную сценарную логику (выбор kernel, fdt, append к bootargs)
+#     удобно положить в `uEnv.txt` на FAT-партиции — он подгружается
+#     и выполняется в начале bootcmd, см. ниже.
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTDELAY=1
+CONFIG_BOOTCOMMAND="mmc rescan; mmc dev 0; if fatload mmc 0 0x100000 uEnv.txt 10000; then env import -t 0x100000 10000; if test -n \"$uenvcmd\"; then run uenvcmd; fi; fi; fatload mmc 0 0x3000000 uImage; fatload mmc 0 0x2A00000 zynq-mini-revb.dtb; bootm 0x3000000 - 0x2A00000"
+
+# Файловые системы и команды для SD-загрузки.
+CONFIG_FS_FAT=y
+CONFIG_CMD_FAT=y
+CONFIG_FAT_WRITE=y
+CONFIG_FS_EXT4=y
+CONFIG_CMD_EXT2=y
+CONFIG_CMD_EXT4=y
+
+CONFIG_LEGACY_IMAGE_FORMAT=y
+CONFIG_CMD_BOOTM=y
+CONFIG_CMD_MMC=y
+
+CONFIG_SYS_PROMPT="zynq-mini> "
+CONFIG_BOOTDELAY=2

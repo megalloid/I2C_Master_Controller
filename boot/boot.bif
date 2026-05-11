@@ -1,0 +1,11 @@
+// Bootgen BIF for ZYNQ MINI Rev B + I2C_Master_Controller.
+//
+// Order matters:  FSBL  ->  bitstream  ->  U-Boot ELF.
+// All paths are absolute and resolved by the Makefile target `boot-bin`.
+//
+the_ROM_image:
+{
+    [bootloader] @FSBL_ELF@
+    @BITSTREAM@
+    @UBOOT_ELF@
+}

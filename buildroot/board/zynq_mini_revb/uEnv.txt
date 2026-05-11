@@ -1,0 +1,14 @@
+# U-Boot environment script for ZYNQ MINI Rev B + I2C Master Controller.
+#
+# `bootcmd` (см. buildroot/board/zynq_mini_revb/uboot.fragment) подгружает
+# этот файл с FAT-партиции SD, делает `env import`, и если задан `uenvcmd`
+# — выполняет его. Это позволяет менять последовательность загрузки прямо
+# на SD-карте без пересборки U-Boot.
+
+bootargs=console=ttyPS0,115200 earlycon root=/dev/mmcblk0p2 rootwait rw
+loadbit_addr=0x100000
+load_dtb_addr=0x2A00000
+load_kernel_addr=0x3000000
+
+# Read kernel + dtb from FAT, then jump.
+uenvcmd=mmc rescan; mmcinfo; fatload mmc 0 ${load_kernel_addr} uImage; fatload mmc 0 ${load_dtb_addr} zynq-mini-revb.dtb; bootm ${load_kernel_addr} - ${load_dtb_addr}

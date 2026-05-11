@@ -1,0 +1,94 @@
+# ZYNQ MINI Rev B (xc7z010 / xc7z020 — same package, same DDR)
+#
+# Apply with:
+#   cd <buildroot-source>
+#   make BR2_EXTERNAL=<repo>/buildroot zynq_mini_revb_defconfig
+#
+# This pulls a Linaro-style toolchain from the host (gcc-arm-linux-gnueabi
+# shipped in Vitis 2025.2 is fine — set BR2_TOOLCHAIN_EXTERNAL_PATH to it
+# in `make menuconfig` if you want to skip building the toolchain).
+
+# --- Architecture ----------------------------------------------------
+BR2_arm=y
+BR2_cortex_a9=y
+BR2_ARM_FPU_NEON=y
+BR2_ARM_INSTRUCTIONS_THUMB2=y
+
+# --- Toolchain (build a fresh one — fully reproducible) --------------
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_TOOLCHAIN_BUILDROOT_WCHAR=y
+
+# --- Linux kernel ----------------------------------------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_LATEST_VERSION=y
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=n
+BR2_LINUX_KERNEL_USE_DEFCONFIG=y
+BR2_LINUX_KERNEL_DEFCONFIG="multi_v7"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/board/zynq_mini_revb/linux.fragment"
+
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/../linux/dts/zynq-mini-revb.dts"
+BR2_LINUX_KERNEL_UIMAGE=y
+# Кавычки обязательны: эта опция объявлена как `string` в Buildroot
+# Config.in. Для Zynq-7000 (Cortex-A9, DDR начинается с 0x0) стандартный
+# адрес загрузки ARM Linux — 0x8000 (= start_of_DDR + 32 KiB).
+BR2_LINUX_KERNEL_UIMAGE_LOADADDR="0x8000"
+
+# --- U-Boot ----------------------------------------------------------
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_LATEST_VERSION=y
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="xilinx_zynq_virt"
+BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/board/zynq_mini_revb/uboot.fragment"
+BR2_TARGET_UBOOT_FORMAT_BIN=y
+BR2_TARGET_UBOOT_FORMAT_IMG=y
+# u-boot.elf нужен bootgen-у для сборки Zynq BOOT.BIN
+# (FSBL.elf + bitstream.bit + u-boot.elf). Без него make boot-bin падает.
+BR2_TARGET_UBOOT_FORMAT_ELF=y
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+# host-openssl + host-gnutls тянутся через Buildroot, чтобы U-Boot host-tools
+# (mkimage / mkeficapsule / kwbimage) корректно увидели libcrypto/gnutls
+# через PKG_CONFIG-окружение Buildroot. Без этого даже при наличии libssl-dev
+# на системе U-Boot линкуется без -lcrypto и падает с undefined refs EVP_*/RSA_*.
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+
+# --- Init / system ---------------------------------------------------
+BR2_INIT_BUSYBOX=y
+BR2_TARGET_GENERIC_HOSTNAME="zynq-mini"
+BR2_TARGET_GENERIC_ISSUE="ZYNQ MINI Rev B - I2C_Master_Controller"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyPS0"
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
+BR2_SYSTEM_DHCP="eth0"
+
+BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
+
+# --- Userspace utilities --------------------------------------------
+BR2_PACKAGE_I2C_TOOLS=y
+BR2_PACKAGE_FBSET=y
+BR2_PACKAGE_FBV=y
+BR2_PACKAGE_DROPBEAR=y
+BR2_PACKAGE_HTOP=y
+BR2_PACKAGE_FILE=y
+BR2_PACKAGE_NANO=y
+
+# --- Out-of-tree i2c-master-axi module ------------------------------
+BR2_PACKAGE_I2C_MASTER_AXI=y
+
+# --- Image ----------------------------------------------------------
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
+BR2_TARGET_ROOTFS_TAR=y
+
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_MTOOLS=y
+# genimage(1) при типе ext{2,3,4} вызывает именно `genext2fs`, а не
+# mkfs.ext4 от host-e2fsprogs. Без этой строки сборка sdcard.img падает
+# с "/bin/sh: 1: genext2fs: not found".
+BR2_PACKAGE_HOST_GENEXT2FS=y
+
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/board/zynq_mini_revb/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/board/zynq_mini_revb/post-image.sh"

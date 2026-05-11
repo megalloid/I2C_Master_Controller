@@ -1,0 +1,40 @@
+# Kernel config fragment merged on top of multi_v7_defconfig.
+# (Buildroot pulls this via BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES.)
+
+# Core Zynq + standard helpers
+CONFIG_ARCH_ZYNQ=y
+CONFIG_SOC_ZYNQ7000=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# I2C subsystem
+CONFIG_I2C=y
+CONFIG_I2C_CHARDEV=y
+CONFIG_I2C_HELPER_AUTO=y
+
+# SSD1306 framebuffer (in-tree, in drivers/video/fbdev/ssd1307fb.c)
+CONFIG_FB=y
+CONFIG_FB_SSD1307=y
+
+# AT24 EEPROM (the on-board AT24C02 sits at FPGA_I2C_SCL2/SDA2 — optional)
+CONFIG_EEPROM_AT24=y
+
+# Ethernet PHY (RTL8211E uses the realtek driver)
+CONFIG_REALTEK_PHY=y
+
+# USB host (USB3320C ULPI PHY)
+CONFIG_USB=y
+CONFIG_USB_CHIPIDEA=y
+CONFIG_USB_CHIPIDEA_HOST=y
+CONFIG_USB_ULPI=y
+CONFIG_USB_ULPI_BUS=y
+
+# QSPI flash
+CONFIG_MTD=y
+CONFIG_MTD_SPI_NOR=y
+CONFIG_SPI_ZYNQ_QSPI=y
+
+# Useful userspace
+CONFIG_OVERLAY_FS=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y

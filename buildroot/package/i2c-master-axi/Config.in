@@ -1,0 +1,10 @@
+config BR2_PACKAGE_I2C_MASTER_AXI
+	bool "i2c-master-axi (custom AXI4-Lite I2C driver)"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Out-of-tree Linux kernel module that exposes the custom
+	  i2c_master_axi IP (AXI4-Lite slave) as a standard
+	  i2c_adapter. Required when running the I2C_Master_Controller
+	  PL design on a ZYNQ MINI Rev B board.
+
+	  Source: $(BR2_EXTERNAL_ZYNQ_MINI_I2C_PATH)/../linux/drivers/i2c-master-axi/
