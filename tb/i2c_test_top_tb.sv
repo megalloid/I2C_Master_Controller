@@ -85,16 +85,15 @@ module i2c_test_top_tb;
     wire btn_negedge;
 
     ax_debounce #(
-        .N        (32),
-        .FREQ     (DB_FREQ),
-        .MAX_TIME (DB_MAX_TIME)
+        .CLK_FREQ_HZ (DB_FREQ * 1_000_000),       // DB_FREQ задано в МГц
+        .DEBOUNCE_MS (DB_MAX_TIME)
     ) u_debounce (
-        .clk            (clk),
-        .rst            (~rst_n),
-        .button_in      (key1),
-        .button_posedge (),
-        .button_negedge (btn_negedge),
-        .button_out     ()
+        .clk_i           (clk),
+        .rstn_i          (rst_n),
+        .btn_i           (key1),
+        .btn_o           (),
+        .btn_pressed_o   (btn_negedge),
+        .btn_released_o  ()
     );
 
     // ---------------------------------------------------------------

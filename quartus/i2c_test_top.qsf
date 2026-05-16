@@ -17,7 +17,7 @@ set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "2.5 V"
 set_global_assignment -name VERILOG_FILE src/i2c_test_top.v
 set_global_assignment -name VERILOG_FILE src/i2c_test_ctrl.v
 set_global_assignment -name VERILOG_FILE src/seg_scan.v
-set_global_assignment -name VERILOG_FILE src/ax_debounce.v
+set_global_assignment -name VERILOG_FILE ../rtl/ax_debounce.v
 set_global_assignment -name VERILOG_FILE ../rtl/i2c_master_core.v
 set_global_assignment -name SDC_FILE i2c_test_top.sdc
 

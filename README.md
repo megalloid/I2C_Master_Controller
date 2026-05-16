@@ -61,13 +61,12 @@ I2C_Master_Controller/
 │   ├── custom,i2c-master.yaml   # DT binding документация
 │   └── zynq-i2c-master-overlay.dts # Пример Device Tree overlay
 ├── quartus/                     # Quartus-проект: тест EEPROM 24LC04 на Cyclone IV
-│   └── src/                     # RTL (i2c_test_top, i2c_test_ctrl, seg_scan, ax_debounce)
+│   └── src/                     # RTL (i2c_test_top, i2c_test_ctrl, seg_scan; ax_debounce берётся из общего rtl/)
 ├── quartus_ssd1306/             # Quartus-проект: тест SSD1306 OLED на Cyclone IV
 │   ├── src/
 │   │   ├── ssd1306_test_top.v   # Top-level (2 кнопки, LED, 7-сег)
 │   │   ├── ssd1306_ctrl.v       # Контроллер SSD1306 (init + static + animation)
-│   │   ├── seg_scan.v           # 7-сегментный сканер
-│   │   └── ax_debounce.v        # Антидребезг кнопок
+│   │   └── seg_scan.v           # 7-сегментный сканер (ax_debounce — общий из ../rtl/)
 │   ├── ssd1306_test.qpf         # Quartus project
 │   ├── ssd1306_test_top.qsf     # Настройки и пины (ALINX AX301)
 │   ├── ssd1306_test_top.sdc     # Тайминг-ограничения
@@ -80,7 +79,6 @@ I2C_Master_Controller/
 │       └── wave.do              # Конфигурация Waveform Viewer
 ├── doc/
 │   ├── DESIGN.md                 # Архитектура и FSM
-│   ├── REGISTERS.md              # Карта регистров
 │   ├── TESTPLAN.md               # План тестирования
 │   ├── INTEGRATION.md            # Интеграция в Zynq
 │   ├── DRIVER.md                 # Документация Linux-драйвера
@@ -165,7 +163,7 @@ All tests PASSED
 | 0x14 | PRESCALE | R/W | SCL = clk / (4×(PRESCALE+1)) |
 | 0x18 | ISR | R/W1C | {AL_IRQ, DONE_IRQ} |
 
-Подробнее: [doc/REGISTERS.md](doc/REGISTERS.md)
+Полная таблица полей, ISR/W1C и типовые комбинации **CMD** — в **§1.4** файла `doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md`; краткая сводка и связь с RTL — в `doc/DESIGN.md` (раздел «Карта регистров»).
 
 ## Аппаратные демо-проекты (Cyclone IV)
 
@@ -220,8 +218,8 @@ i2cget -y 0 0x50 0   # Чтение из EEPROM
 
 | Документ | Описание |
 |----------|----------|
-| [DESIGN.md](doc/DESIGN.md) | Архитектура, FSM-диаграммы, проектные решения |
-| [REGISTERS.md](doc/REGISTERS.md) | Полная карта регистров с битовыми полями |
+| [DESIGN.md](doc/DESIGN.md) | Архитектура, FSM-диаграммы, проектные решения; краткая карта регистров |
+| [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md) | Vivado/Vitis с нуля для Zynq; в §1.4 — полная карта регистров AXI-обёртки |
 | [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
 | [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
 | [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter driver: сборка, DT, использование |

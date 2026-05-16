@@ -11,7 +11,7 @@
  *   - Clock stretching, arbitration lost detection
  *   - I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL
  *
- * Register map (see doc/REGISTERS.md):
+ * Register map matches rtl/i2c_master_axi.v and doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md §1.4:
  *   0x00  CTRL      R/W    [1:0] = {IEN, EN}
  *   0x04  STATUS    R      [3:0] = {AL, BUSY, RXACK, TIP}
  *   0x08  CMD       W      [4:0] = {NACK, WR, RD, STO, STA}

@@ -40,16 +40,16 @@ CORE_WAVE  := $(SIM_DIR)/i2c_core_tb.vcd
 # Hardware test (EEPROM test shell — all submodules)
 HW_DIR     := quartus/src
 HW_RTL     := $(RTL_DIR)/i2c_master_core.v \
+              $(RTL_DIR)/ax_debounce.v \
               $(HW_DIR)/i2c_test_ctrl.v \
-              $(HW_DIR)/seg_scan.v \
-              $(HW_DIR)/ax_debounce.v
+              $(HW_DIR)/seg_scan.v
 HW_TB      := $(TB_DIR)/i2c_slave_model.sv \
               $(TB_DIR)/i2c_test_top_tb.sv
 HW_OUT     := $(SIM_DIR)/i2c_test_top_tb.vvp
 HW_WAVE    := $(SIM_DIR)/i2c_test_top_tb.vcd
 
 .PHONY: all sim sim-axi sim-c4 sim-core sim-hw wave wave-core wave-hw lint lint-axi lint-c4 lint-core lint-ssd1306 clean questa questa-gui questa-clean \
-        vivado-build vivado-program vivado-clean vitis-build vitis-run vitis-clean \
+        vivado-build vivado-project vivado-open vivado-program vivado-clean vitis-build vitis-run vitis-clean \
         boot-bin boot-bin-clean buildroot-init buildroot-build buildroot-menuconfig buildroot-clean buildroot-rebuild \
         uboot-rebuild linux-rebuild sdcard-rebuild sdcard-quick \
         jtag-boot jtag-fsbl jtag-ps7
@@ -126,10 +126,10 @@ lint-core:
 SSD_DIR := quartus_ssd1306/src
 SSD_RTL := $(CORE_SRC) \
            $(RTL_DIR)/i2c_burst_writer.v \
+           $(RTL_DIR)/ax_debounce.v \
            $(SSD_DIR)/scene_renderer.v \
            $(SSD_DIR)/ssd1306_ctrl.v \
            $(SSD_DIR)/seg_scan.v \
-           $(SSD_DIR)/ax_debounce.v \
            $(SSD_DIR)/ssd1306_test_top.v
 
 lint-ssd1306:
@@ -171,6 +171,24 @@ vivado-build:
 	@echo ">>> Vivado: synth + impl + bitstream + XSA  (part = $(PART))"
 	bash -c "$(VIVADO_ENV) && cd vivado && \
 	    VIVADO_PART=$(PART) vivado -mode batch -nojournal -nolog -source build.tcl 2>&1 | tee build.log"
+
+# Создать проект + Block Design без долгого синтеза — для просмотра/правки в GUI.
+# После завершения откройте  vivado/proj/zynq_mini_oled.xpr  в Vivado IDE.
+vivado-project:
+	@mkdir -p vivado
+	@echo ">>> Vivado: project + BD only (no synthesis) — part = $(PART)"
+	bash -c "$(VIVADO_ENV) && cd vivado && \
+	    VIVADO_PART=$(PART) BUILD_PROJECT_ONLY=1 \
+	    vivado -mode batch -nojournal -nolog -source build.tcl 2>&1 | tee build-project.log"
+	@echo ">>> Project ready:  vivado/proj/zynq_mini_oled.xpr"
+	@echo ">>> Open it with:   make vivado-open"
+
+# Удобный лаунчер GUI на готовый проект.
+vivado-open:
+	@if [ ! -f vivado/proj/zynq_mini_oled.xpr ]; then \
+	    echo "ERROR: vivado/proj/zynq_mini_oled.xpr not found. Run 'make vivado-project' first."; \
+	    exit 1; fi
+	bash -c "$(VIVADO_ENV) && vivado vivado/proj/zynq_mini_oled.xpr &"
 
 vivado-program:
 	@echo ">>> Vivado: программирование платы по JTAG"

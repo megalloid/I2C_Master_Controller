@@ -58,8 +58,8 @@ quartus/
 └── src/
     ├── i2c_test_top.v         # Top-level: prescaler, core, ctrl, display
     ├── i2c_test_ctrl.v        # Test controller FSM (4 тестов)
-    ├── seg_scan.v             # 7-segment multiplexer (6 digits)
-    └── ax_debounce.v          # Button debouncer (20 ms)
+    └── seg_scan.v             # 7-segment multiplexer (6 digits)
+(ax_debounce.v подключается из общего ../rtl/ax_debounce.v)
 ```
 
 I2C ядро берётся из `../rtl/i2c_master_core.v`.

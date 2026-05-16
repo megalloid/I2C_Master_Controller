@@ -123,7 +123,7 @@ verilator --lint-only -Wall -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
     quartus_ssd1306/src/scene_renderer.v \
     quartus_ssd1306/src/ssd1306_ctrl.v \
     quartus_ssd1306/src/seg_scan.v \
-    quartus_ssd1306/src/ax_debounce.v \
+    rtl/ax_debounce.v \
     quartus_ssd1306/src/ssd1306_test_top.v \
     --top-module ssd1306_test_top
 ```
@@ -136,8 +136,8 @@ quartus_ssd1306/
 │   ├── ssd1306_test_top.v    — top-level (2 кнопки, LED, 7-сег)
 │   ├── ssd1306_ctrl.v        — FSM init/render/frame + burst_writer
 │   ├── scene_renderer.v      — рендер кадра (FB + куб + текст)
-│   ├── seg_scan.v            — 7-сегментный сканер
-│   └── ax_debounce.v         — антидребезг кнопок
+│   └── seg_scan.v            — 7-сегментный сканер
+│   (ax_debounce.v подключается из общего rtl/ax_debounce.v)
 ├── ssd1306_test.qpf          — Quartus проект
 ├── ssd1306_test_top.qsf      — настройки и pin-ассайнменты
 ├── ssd1306_test_top.sdc      — тайминг-ограничения

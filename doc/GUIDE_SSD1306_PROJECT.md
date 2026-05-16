@@ -5418,85 +5418,109 @@ wire scl_s = scl_sync[1];
 2 ступени — стандарт де-факто для CDC.  3+ ступени используют
 для сверхкритических приложений (авиация, медицина).
 
-### 8.5. Антидребезг кнопок (строки 82–92 + `ax_debounce.v`)
+### 8.5. Антидребезг кнопок (строки 82–98 + `rtl/ax_debounce.v`)
+
+Модуль `ax_debounce.v` — общий для всех проектов репозитория и лежит
+в `rtl/ax_debounce.v`.  Из `ssd1306_test_top.qsf` он подключается
+строкой `set_global_assignment -name VERILOG_FILE ../rtl/ax_debounce.v`.
 
 Инстанциация в top-level:
 
 ```verilog
 wire key_start_pulse, key_anim_pulse;
 
-ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_start (
-    .clk_i(clk_50m), .rstn_i(rst_n),
-    .key_i(key_start), .key_pulse_o(key_start_pulse)
+ax_debounce #(.CLK_FREQ_HZ(50_000_000), .DEBOUNCE_MS(20)) u_deb_start (
+    .clk_i          (clk_50m),
+    .rstn_i         (rst_n),
+    .btn_i          (key_start),
+    .btn_o          (),
+    .btn_pressed_o  (key_start_pulse),
+    .btn_released_o ()
 );
 
-ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_anim (
-    .clk_i(clk_50m), .rstn_i(rst_n),
-    .key_i(key_anim), .key_pulse_o(key_anim_pulse)
+ax_debounce #(.CLK_FREQ_HZ(50_000_000), .DEBOUNCE_MS(20)) u_deb_anim (
+    .clk_i          (clk_50m),
+    .rstn_i         (rst_n),
+    .btn_i          (key_anim),
+    .btn_o          (),
+    .btn_pressed_o  (key_anim_pulse),
+    .btn_released_o ()
 );
 ```
 
 Два экземпляра, по одному на каждую кнопку.  Параметр
 `DEBOUNCE_MS = 20` — типичное значение для механических кнопок
 (большинство «звенят» 5–10 мс при нажатии и 10–20 мс при отпускании).
+`CLK_FREQ_HZ` задаётся в герцах — это удобнее ручного перевода
+МГц↔Гц при смене проекта.
 
-**Внутри `ax_debounce.v`** (45 строк, полный разбор):
+**Внутри `ax_debounce.v`** (~90 строк со всеми комментариями) —
+основные идеи:
 
 ```verilog
 module ax_debounce #(
-    parameter CLK_FREQ    = 50_000_000,
-    parameter DEBOUNCE_MS = 20
+    parameter integer CLK_FREQ_HZ = 50_000_000,
+    parameter integer DEBOUNCE_MS = 20
 )(
     input  wire clk_i,
-    input  wire rstn_i,
-    input  wire key_i,
-    output reg  key_pulse_o
+    input  wire rstn_i,                // active-low async
+    input  wire btn_i,                 // raw (active-low button)
+    output reg  btn_o,                 // debounced level
+    output reg  btn_pressed_o,         // 1-cycle pulse on press  (1→0)
+    output reg  btn_released_o         // 1-cycle pulse on release (0→1)
 );
+    localparam integer TIMER_MAX = (CLK_FREQ_HZ / 1000) * DEBOUNCE_MS;
+    localparam integer CNT_W     = $clog2(TIMER_MAX + 1);   // авто-разрядность
 
-    localparam CNT_MAX = (CLK_FREQ / 1000) * DEBOUNCE_MS;
+    reg [CNT_W-1:0] cnt;
+    reg             dff1, dff2;        // 2-стадийный синхронизатор
+    reg             btn_o_d;
 
-    reg [19:0] cnt;
-    reg        key_d;
-    reg        key_stable;
+    wire edge_seen  = (dff1 ^ dff2);   // вход «дрогнул»
+    wire cnt_at_max = (cnt == TIMER_MAX[CNT_W-1:0]);
 
-    always @(posedge clk_i or negedge rstn_i) begin
-        if (!rstn_i) begin
-            cnt         <= 20'd0;
-            key_d       <= 1'b1;
-            key_stable  <= 1'b1;
-            key_pulse_o <= 1'b0;
-        end else begin
-            key_pulse_o <= 1'b0;             // pre-assign: импульс 1 такт
-            key_d       <= key_i;            // однократная выборка
-
-            if (key_d != key_stable) begin   // есть рассогласование
-                if (cnt >= CNT_MAX[19:0] - 20'd1) begin
-                    cnt        <= 20'd0;
-                    key_stable <= key_d;     // принять новое состояние
-                    if (!key_d)
-                        key_pulse_o <= 1'b1; // фронт 1→0 = нажатие
-                end else
-                    cnt <= cnt + 20'd1;
-            end else
-                cnt <= 20'd0;                // сброс — состояние стабильно
+    // (1) sync + debounce-таймер
+    always @(posedge clk_i or negedge rstn_i)
+        if (!rstn_i)        begin dff1 <= 1; dff2 <= 1; cnt <= 0; end
+        else begin
+            dff1 <= btn_i;  dff2 <= dff1;
+            if (edge_seen)        cnt <= 0;
+            else if (!cnt_at_max) cnt <= cnt + 1'b1;
         end
-    end
+
+    // (2) фиксация устаканенного значения
+    always @(posedge clk_i or negedge rstn_i)
+        if (!rstn_i)         btn_o <= 1'b1;
+        else if (cnt_at_max) btn_o <= dff2;
+
+    // (3) edge-детектор → 1-cycle pulses
+    always @(posedge clk_i or negedge rstn_i)
+        if (!rstn_i) begin
+            btn_o_d <= 1'b1; btn_pressed_o <= 0; btn_released_o <= 0;
+        end else begin
+            btn_o_d        <= btn_o;
+            btn_pressed_o  <=  btn_o_d & ~btn_o;
+            btn_released_o <= ~btn_o_d &  btn_o;
+        end
 endmodule
 ```
 
 Алгоритм на пальцах:
 
-1. `key_d` — входной сэмпл прошлого такта; `key_stable` — текущее
-   «признанное» состояние.
-2. **Если совпадают** — сигнал стабилен, счётчик сброшен.
-3. **Если не совпадают** — наращиваем счётчик.  Как только он
-   достигает `CNT_MAX - 1` = **20 мс × 50 МГц / 1000 = 1 000 000** —
-   признаём новое состояние стабильным.
-4. **Только на фронте `1 → 0`** (нажатие, т. к. активность-low)
-   генерируем одноцикловый `key_pulse_o`.  На отпускании — нет.
+1. **`dff1`, `dff2`** — 2-стадийный синхронизатор сырого входа
+   (защита от метастабильности на асинхронной кнопке).
+2. **`edge_seen = dff1 ^ dff2`** — индикатор того, что вход «шевелится».
+   Любое расхождение сбрасывает таймер.
+3. **Таймер `cnt`** считает только пока вход стабилен.  Дошёл до
+   `TIMER_MAX` (для 50 МГц и 20 мс — это 1 000 000 тактов) — фиксируем
+   устаканенный уровень `dff2` в `btn_o`.
+4. **Edge-детектор** на `btn_o` отдельным процессом превращает
+   фронты в одно-тактные импульсы: `btn_pressed_o` (1→0, нажатие)
+   и `btn_released_o` (0→1, отпускание).
 
 Такая схема:
-- **Одно нажатие** даёт **ровно один** `key_pulse_o` — идеально для
+
+- **Одно нажатие** даёт **ровно один** `btn_pressed_o` — идеально для
   FSM `ssd1306_ctrl`.
 - **Любые дребезги** короче 20 мс игнорируются.
 - **Нажатия короче 20 мс** тоже игнорируются — это защищает от
@@ -5504,9 +5528,11 @@ endmodule
 - **Задержка распознавания** — 20 мс.  Нечувствительно для
   человека.
 
-`CNT_MAX` = 1 000 000 = 0xF4240 — помещается в 20 бит
-(максимум 0xFFFFF = 1 048 575).  Разрядность `cnt` подобрана с
-запасом под параметр `DEBOUNCE_MS` до ~20 мс.
+Ширина счётчика `CNT_W` выводится из `TIMER_MAX` через
+`$clog2(TIMER_MAX+1)` — для 50 МГц/20 мс это 20 бит, но при
+изменении параметров (например, 100 МГц/50 мс) Verilog автоматически
+пересчитает разрядность без ручной правки кода.  Никаких «магических
+N=32» — параметризация чистая.
 
 ### 8.6. I2C Master Core — инстанциация (строки 97–119)
 
@@ -5842,7 +5868,7 @@ src/ssd1306_test_top.v
 src/ssd1306_ctrl.v
 src/scene_renderer.v
 src/seg_scan.v
-src/ax_debounce.v
+../rtl/ax_debounce.v
 ../rtl/i2c_master_core.v
 ../rtl/i2c_burst_writer.v
 ssd1306_test_top.sdc

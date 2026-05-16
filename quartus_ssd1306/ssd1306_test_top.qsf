@@ -18,7 +18,7 @@ set_global_assignment -name VERILOG_FILE src/ssd1306_test_top.v
 set_global_assignment -name VERILOG_FILE src/ssd1306_ctrl.v
 set_global_assignment -name VERILOG_FILE src/scene_renderer.v
 set_global_assignment -name VERILOG_FILE src/seg_scan.v
-set_global_assignment -name VERILOG_FILE src/ax_debounce.v
+set_global_assignment -name VERILOG_FILE ../rtl/ax_debounce.v
 set_global_assignment -name VERILOG_FILE ../rtl/i2c_master_core.v
 set_global_assignment -name VERILOG_FILE ../rtl/i2c_burst_writer.v
 set_global_assignment -name SDC_FILE ssd1306_test_top.sdc

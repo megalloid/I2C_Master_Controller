@@ -81,14 +81,22 @@ module ssd1306_test_top (
     // ---------------------------------------------------------------
     wire key_start_pulse, key_anim_pulse;
 
-    ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_start (
-        .clk_i(clk_50m), .rstn_i(rst_n),
-        .key_i(key_start), .key_pulse_o(key_start_pulse)
+    ax_debounce #(.CLK_FREQ_HZ(50_000_000), .DEBOUNCE_MS(20)) u_deb_start (
+        .clk_i          (clk_50m),
+        .rstn_i         (rst_n),
+        .btn_i          (key_start),
+        .btn_o          (),
+        .btn_pressed_o  (key_start_pulse),
+        .btn_released_o ()
     );
 
-    ax_debounce #(.CLK_FREQ(50_000_000), .DEBOUNCE_MS(20)) u_deb_anim (
-        .clk_i(clk_50m), .rstn_i(rst_n),
-        .key_i(key_anim), .key_pulse_o(key_anim_pulse)
+    ax_debounce #(.CLK_FREQ_HZ(50_000_000), .DEBOUNCE_MS(20)) u_deb_anim (
+        .clk_i          (clk_50m),
+        .rstn_i         (rst_n),
+        .btn_i          (key_anim),
+        .btn_o          (),
+        .btn_pressed_o  (key_anim_pulse),
+        .btn_released_o ()
     );
 
     // ---------------------------------------------------------------

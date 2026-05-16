@@ -352,6 +352,22 @@ set_property top ${top_module} [current_fileset]
 add_files -fileset constrs_1 -norecurse [file join $repo_root vivado/pins.xdc]
 
 # ---------------------------------------------------------------
+# 4.5  Опциональный ранний выход: только проект + BD без долгого синтеза.
+#
+# Удобно, если хотите открыть проект в Vivado IDE и посмотреть/поправить
+# настройки PS7 / BD / констрейнты перед запуском синтеза.
+#
+# Включается переменной окружения BUILD_PROJECT_ONLY=1
+# (Makefile прокидывает её для цели  make vivado-project).
+# ---------------------------------------------------------------
+if {[info exists ::env(BUILD_PROJECT_ONLY)] && $::env(BUILD_PROJECT_ONLY) eq "1"} {
+    puts "INFO: BUILD_PROJECT_ONLY=1 — пропускаем synthesis/impl/bitstream/XSA."
+    puts "INFO: проект готов: [file join $proj_dir $proj_name.xpr]"
+    puts "INFO: откройте его в Vivado:  vivado [file join $proj_dir $proj_name.xpr] &"
+    return
+}
+
+# ---------------------------------------------------------------
 # 5. Synthesis → Implementation → Bitstream
 # ---------------------------------------------------------------
 set jobs 8

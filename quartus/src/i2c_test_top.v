@@ -57,17 +57,17 @@ module i2c_test_top (
     end
 
     // ---------------------------------------------------------------
-    // Button debouncer
+    // Button debouncer (общий rtl/ax_debounce.v, default 50 МГц / 20 мс)
     // ---------------------------------------------------------------
     wire btn_negedge;
 
     ax_debounce u_debounce (
-        .clk            (clk),
-        .rst            (~rst_n),
-        .button_in      (key1),
-        .button_posedge (),
-        .button_negedge (btn_negedge),
-        .button_out     ()
+        .clk_i           (clk),
+        .rstn_i          (rst_n),
+        .btn_i           (key1),
+        .btn_o           (),
+        .btn_pressed_o   (btn_negedge),    // pulse при нажатии (1→0)
+        .btn_released_o  ()
     );
 
     // ---------------------------------------------------------------
