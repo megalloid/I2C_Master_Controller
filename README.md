@@ -1,39 +1,49 @@
 # I2C Master Controller
 
 Production-ready I2C мастер-контроллер для FPGA с двумя вариантами шинного интерфейса:
-- **AXI4-Lite** — для Xilinx Zynq SoC
-- **Avalon-MM** — для Intel Cyclone IV / NIOS II
 
-Включает модуль пакетной записи (`i2c_burst_writer`) для эффективной передачи длинных последовательностей байт (страницы EEPROM, фреймбуфер дисплея и т.д.).
+- **AXI4-Lite** — Xilinx Zynq-7000 (PS + PL), плата **ZYNQ MINI Rev B**, OLED на I²C в PL
+- **Avalon-MM** — Intel Cyclone IV / NIOS II (демо на ALINX AX301)
+
+Общее ядро `i2c_master_core` одно и то же; меняется только шинная обёртка (`i2c_master_axi` / `i2c_master_avalon`). В репозитории также есть модуль пакетной записи `i2c_burst_writer` (длинные последовательности байт — EEPROM, фреймбуфер дисплея и т.д.).
+
+## С чего начать
+
+| Цель | Первый шаг | Основной документ |
+|------|------------|-------------------|
+| Понять RTL и прогнать тесты без Vivado | `make sim-axi` | [GUIDE_TESTING.md](doc/GUIDE_TESTING.md), [TESTPLAN.md](doc/TESTPLAN.md) |
+| Собрать проект Vivado/Vitis для Zynq с нуля | читать гайд по шагам | **[GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md)** |
+| Автоматическая сборка bitstream + ELF | `make vivado-build` | [GUIDE_PS_PL_BUILD.md](doc/GUIDE_PS_PL_BUILD.md) |
+| Linux + Buildroot на плате | `make buildroot-init` | [GUIDE_BUILDROOT.md](doc/GUIDE_BUILDROOT.md) |
+| Демо на Cyclone IV (EEPROM / OLED) | открыть `quartus/*.qpf` | [quartus/README.md](quartus/README.md), [GUIDE_SSD1306_PROJECT.md](doc/GUIDE_SSD1306_PROJECT.md) |
+
+Полная **карта регистров** AXI-обёртки (биты, CMD, PRESCALE, ISR) — в **§1.4** [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md). Краткая сводка и связь с RTL — в [DESIGN.md](doc/DESIGN.md).
 
 ## Возможности
 
 - Полная поддержка I2C Master: START, STOP, RESTART, 7-bit адресация
-- Запись и чтение байтов с ACK/NACK обработкой
-- Clock stretching (ожидание slave)
-- Обнаружение потери арбитража (Arbitration Lost)
-- Настраиваемая частота SCL через прескалер (Standard / Fast / Fast Mode Plus)
-- AXI4-Lite slave интерфейс (7 регистров)
-- Прерывания: завершение транзакции (DONE) и потеря арбитража (AL)
-- 2-stage синхронизаторы на входах SDA/SCL
-- Составные команды (STA+WR, RD+NACK+STO) через секвенсер
-- **Пакетная запись** (`i2c_burst_writer`): автоматическая передача N байт одной командой
-- **Аппаратные демо-проекты** для Cyclone IV: EEPROM тест и SSD1306 OLED с анимацией
+- Запись и чтение байтов с ACK/NACK
+- Clock stretching, обнаружение потери арбитража
+- Настраиваемая частота SCL (Standard / Fast / Fast Mode Plus) через **PRESCALE**
+- AXI4-Lite slave: 7 регистров; прерывания DONE / AL
+- 2-stage синхронизаторы на SDA/SCL; составные команды (STA+WR, RD+NACK+STO) через секвенсер
+- **Пакетная запись** (`i2c_burst_writer`)
+- **Симуляция:** self-checking testbench (AXI BFM + модель slave), 8 сценариев TEST 0…7
+- **Zynq:** Vivado Block Design, bare-metal (Vitis), Linux-драйвер, Buildroot, userspace `oled-clock`
+- **Cyclone IV:** аппаратные демо EEPROM и SSD1306 OLED
 
 ## Архитектура
 
-Ядро `i2c_master_core` — общее для обеих платформ. Шинная обёртка (AXI / Avalon) взаимозаменяема.
-
 ```mermaid
 graph TD
-    PS[CPU: ARM / NIOS II] -->|AXI4-Lite или Avalon-MM| WRAP[Обёртка: i2c_master_axi / avalon]
+    PS[CPU: ARM Cortex-A9 / NIOS II] -->|AXI4-Lite или Avalon-MM| WRAP[i2c_master_axi / avalon]
     WRAP --> CORE[i2c_master_core]
     WRAP --> SYNC[Синхронизаторы]
     WRAP --> PRE[Прескалер]
     WRAP --> SEQ[Секвенсер]
     WRAP --> IRQ[Прерывания]
-    WRAP --> BUF[Tri-state буферы]
-    BUF --> BUS[I2C Bus: SDA/SCL]
+    WRAP --> BUF[Open-drain / IOBUF]
+    BUF --> BUS[I2C: SDA / SCL]
 ```
 
 ## Структура проекта
@@ -41,115 +51,101 @@ graph TD
 ```
 I2C_Master_Controller/
 ├── rtl/
-│   ├── i2c_master_core.v        # Низкоуровневое I2C ядро (FSM) — общее
+│   ├── i2c_master_core.v        # I2C ядро (FSM) — общее
 │   ├── i2c_master_axi.v         # AXI4-Lite обёртка (Zynq)
-│   ├── i2c_master_top.v         # Top-level AXI (Zynq)
-│   ├── i2c_master_avalon.v      # Avalon-MM обёртка (Cyclone IV)
-│   ├── i2c_master_top_c4.v      # Top-level Avalon (Cyclone IV)
-│   └── i2c_burst_writer.v      # Модуль пакетной I2C записи (START+addr+N bytes+STOP)
+│   ├── i2c_master_top.v         # Top с inout SDA/SCL (симуляция / пример)
+│   ├── i2c_master_avalon.v      # Avalon-MM (Cyclone IV)
+│   ├── i2c_master_top_c4.v
+│   ├── i2c_burst_writer.v       # Пакетная запись N байт
+│   └── ax_debounce.v            # Антидребезг (общий для Quartus-проектов)
 ├── tb/
-│   ├── i2c_slave_model.sv       # Модель I2C slave (EEPROM 256 байт)
-│   ├── axi_lite_master_bfm.sv   # AXI4-Lite master BFM
-│   ├── i2c_master_tb.sv         # Тестбенч AXI (10 сценариев)
-│   ├── avalon_mm_master_bfm.sv  # Avalon-MM master BFM
-│   ├── i2c_master_c4_tb.sv      # Тестбенч Avalon (10 сценариев)
-│   └── i2c_core_tb.sv           # Тестбенч ядра напрямую (без обёртки)
-├── driver/
-│   ├── i2c-zynq-master.c        # Linux I2C adapter driver
-│   ├── Makefile                  # Out-of-tree сборка модуля
-│   ├── Kconfig                   # Для in-tree интеграции
-│   ├── custom,i2c-master.yaml   # DT binding документация
-│   └── zynq-i2c-master-overlay.dts # Пример Device Tree overlay
-├── quartus/                     # Quartus-проект: тест EEPROM 24LC04 на Cyclone IV
-│   └── src/                     # RTL (i2c_test_top, i2c_test_ctrl, seg_scan; ax_debounce берётся из общего rtl/)
-├── quartus_ssd1306/             # Quartus-проект: тест SSD1306 OLED на Cyclone IV
-│   ├── src/
-│   │   ├── ssd1306_test_top.v   # Top-level (2 кнопки, LED, 7-сег)
-│   │   ├── ssd1306_ctrl.v       # Контроллер SSD1306 (init + static + animation)
-│   │   └── seg_scan.v           # 7-сегментный сканер (ax_debounce — общий из ../rtl/)
-│   ├── ssd1306_test.qpf         # Quartus project
-│   ├── ssd1306_test_top.qsf     # Настройки и пины (ALINX AX301)
-│   ├── ssd1306_test_top.sdc     # Тайминг-ограничения
-│   └── README.md
-├── sim/
-│   └── questa/                  # Скрипты Questa / ModelSim
-│       ├── compile.do           # Компиляция RTL + TB
-│       ├── run_batch.do         # Batch-симуляция
-│       ├── run_gui.do           # GUI-симуляция с волнами
-│       └── wave.do              # Конфигурация Waveform Viewer
-├── doc/
-│   ├── DESIGN.md                 # Архитектура и FSM
-│   ├── TESTPLAN.md               # План тестирования
-│   ├── INTEGRATION.md            # Интеграция в Zynq
-│   ├── DRIVER.md                 # Документация Linux-драйвера
-│   ├── INTEGRATION_CYCLONE4.md   # Интеграция в Cyclone IV
-│   ├── GUIDE_I2C_MASTER_CORE.md # Подробный гайд по проектированию ядра
-│   ├── GUIDE_TESTING.md         # Руководство по тестированию (8 сценариев)
-│   ├── GUIDE_TESTING_CORE.md   # Руководство по тестированию ядра напрямую
-│   └── GUIDE_SSD1306_PROJECT.md # Подробный гайд по проекту SSD1306 OLED
+│   ├── i2c_master_tb.sv         # Тестбенч AXI (TEST 0…7)
+│   ├── axi_lite_master_bfm.sv
+│   ├── i2c_slave_model.sv
+│   ├── i2c_master_c4_tb.sv      # Тестбенч Avalon
+│   ├── avalon_mm_master_bfm.sv
+│   ├── i2c_core_tb.sv
+│   └── i2c_test_top_tb.sv      # Симуляция quartus EEPROM shell
+├── vivado/                      # Zynq: Tcl-сборка, XDC, BD
+│   ├── build.tcl                # Проект + BD + synth (или только проект)
+│   ├── create_bd.tcl            # Создание Block Design
+│   ├── program.tcl
+│   └── pins.xdc
+├── vitis/                       # Bare-metal: platform + oled_demo
+│   ├── build.py
+│   └── run.tcl
+├── linux/                       # Linux: DTS, in-tree driver, userspace
+│   ├── dts/zynq-mini-revb.dts
+│   ├── drivers/i2c-master-axi/
+│   └── userspace/oled-clock/
+├── driver/                      # Out-of-tree модуль i2c-zynq-master (альт.)
+├── buildroot/                   # BR2 external для ZYNQ MINI Rev B
+├── boot/                        # JTAG boot (FSBL + bitstream)
+├── quartus/                     # EEPROM 24LC04 на Cyclone IV
+├── quartus_ssd1306/             # SSD1306 OLED на Cyclone IV
+├── sim/questa/                  # Questa: compile.do, wave.do
+├── doc/                         # Гайды и спецификации (см. таблицу ниже)
 ├── Makefile
-├── .gitignore
 └── README.md
 ```
 
-## Быстрый старт
+## Быстрый старт: симуляция
 
-### Предварительные требования
+### Требования
 
-- [Icarus Verilog](http://iverilog.icarus.com/) >= 12.0
-- [Verilator](https://www.veripool.org/verilator/) >= 5.0 (для lint)
+- [Icarus Verilog](http://iverilog.icarus.com/) ≥ 12.0 (`iverilog`, `vvp`)
+- [Verilator](https://www.veripool.org/verilator/) ≥ 5.0 (lint)
 - [Questa / ModelSim](https://eda.sw.siemens.com/en-US/ic/questa/) (опционально)
 
-### Сборка и запуск тестов (Icarus Verilog)
+### Команды
 
 ```bash
-make sim        # Симуляция обоих вариантов (AXI + Avalon)
-make sim-axi    # Только AXI (Zynq) тестбенч
-make sim-c4     # Только Avalon (Cyclone IV) тестбенч
-make sim-core   # Тестбенч ядра напрямую (без обёртки)
-make lint       # Lint-проверка обоих вариантов
-make clean      # Очистка артефактов
+make sim-axi      # Zynq: i2c_master_axi + top + TB → sim/i2c_master_tb.vcd
+make sim-c4       # Cyclone IV: Avalon-вариант
+make sim-core     # Только i2c_master_core
+make sim-hw       # Quartus EEPROM test shell (i2c_test_top)
+make lint-axi     # Verilator lint AXI-стека
+make clean
 ```
 
-### Симуляция в Questa / ModelSim
+Перед интеграцией в Vivado имеет смысл убедиться, что **`make sim-axi`** завершается с `All tests PASSED` — см. **§5.7** в [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md).
+
+### Questa / ModelSim
 
 ```bash
-make questa       # Batch-режим (без GUI) — компиляция + прогон всех тестов
-make questa-gui   # GUI-режим — с автоматической загрузкой wave.do
-make questa-clean # Очистка артефактов Questa
+make questa       # batch
+make questa-gui   # GUI + wave.do (группы: AXI, I2C, Core FSM, Sequencer, Slave)
 ```
 
-Скрипты находятся в `sim/questa/`:
-
-| Файл | Назначение |
-|------|------------|
-| `compile.do` | Компиляция RTL + TB в библиотеку `work` |
-| `run_batch.do` | Batch-симуляция (compile → run → quit) |
-| `run_gui.do` | GUI-симуляция (compile → load waves → run) |
-| `wave.do` | Конфигурация Waveform Viewer: 8 групп сигналов |
-
-Группы сигналов в `wave.do`:
-
-- **System** — clk, rst_n, irq
-- **I2C Bus** — SDA, SCL
-- **AXI Write** / **AXI Read** — все каналы AXI4-Lite
-- **Core FSM** — state, phase, bit_cnt, shift-регистры
-- **Core I/O** — cmd_valid, cmd, din, dout, ready, rx_ack, scl/sda_oen
-- **Slave Model** — FSM slave-модели, shift-регистр, mem_ptr
-- **AXI Regs** — ctrl, prescale, tx_data, isr, tip
-- **Sequencer** — seq_state, core_cmd, sub_cmd_sent
-
-### Результат
+### Ожидаемый результат
 
 ```
 === TEST 0: Register read-back ===
   PASS: PRESCALE read-back OK
-=== TEST 1: Single byte write + read-back ===
-  PASS: read 0xa5 == expected 0xA5
 ...
   TEST SUMMARY:  PASS=10  FAIL=0
 All tests PASSED
 ```
+
+## Быстрый старт: Zynq MINI Rev B
+
+Нужны **Vivado** и (для ELF) **Vitis** 2025.x, переменная `XILINX_ROOT` или установка в `/tools/Xilinx`.
+
+```bash
+# Только проект + Block Design (без долгого synth) — правки в GUI
+make vivado-project
+make vivado-open          # vivado/proj/zynq_mini_oled.xpr
+
+# Полная сборка bitstream + XSA
+make vivado-build
+make vivado-build PART=xc7z020clg400-1   # при необходимости другой speedgrade
+
+make vivado-program       # JTAG
+make vitis-build          # bare-metal oled_demo.elf
+make vitis-run
+```
+
+Пошагово «с нуля» (Add Sources, BD, XDC, Vitis, Linux) — **[GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md)**. Краткий автоматизированный поток — **[GUIDE_PS_PL_BUILD.md](doc/GUIDE_PS_PL_BUILD.md)**.
 
 ## Карта регистров (кратко)
 
@@ -163,73 +159,71 @@ All tests PASSED
 | 0x14 | PRESCALE | R/W | SCL = clk / (4×(PRESCALE+1)) |
 | 0x18 | ISR | R/W1C | {AL_IRQ, DONE_IRQ} |
 
-Полная таблица полей, ISR/W1C и типовые комбинации **CMD** — в **§1.4** файла `doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md`; краткая сводка и связь с RTL — в `doc/DESIGN.md` (раздел «Карта регистров»).
+Подробности, типовые комбинации **CMD**, примеры на C — **§1.4** [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md).
 
-## Аппаратные демо-проекты (Cyclone IV)
+## Аппаратные демо (Cyclone IV, ALINX AX301)
 
-Оба проекта предназначены для платы **ALINX AX301** (EP4CE6F17C8, 50 МГц).
+### EEPROM 24LC04 — `quartus/`
 
-### EEPROM 24LC04 (`quartus/`)
+Запись/чтение I²C EEPROM по кнопке; индикация на LED и 7-сегментнике. [quartus/README.md](quartus/README.md), [GUIDE_QUARTUS_EEPROM_TEST.md](doc/GUIDE_QUARTUS_EEPROM_TEST.md).
 
-Тест записи/чтения I2C EEPROM по нажатию кнопки. Результат на светодиодах и 7-сегментном дисплее.
+### SSD1306 OLED — `quartus_ssd1306/`
 
-### SSD1306 OLED (`quartus_ssd1306/`)
+| Кнопка | Функция |
+|--------|---------|
+| KEY2 | Статическая тестовая картинка |
+| KEY3 | Анимация «прожектор» (~10 FPS при I²C 100 кГц) |
 
-Два режима работы:
+[quartus_ssd1306/README.md](quartus_ssd1306/README.md), [GUIDE_SSD1306_PROJECT.md](doc/GUIDE_SSD1306_PROJECT.md).
 
-| Кнопка | Пин | Функция |
-|--------|-----|---------|
-| KEY2 | M15 | Статическая тестовая картинка (4 квадранта с рамкой) |
-| KEY3 | M16 | Анимация «прожектор» — полоса света скользит по экрану (повторное нажатие — стоп) |
+## Linux
 
-Анимация генерируется аппаратно со скоростью ~10 FPS (ограничена пропускной способностью I2C 100 кГц). Светодиод LED[3] индицирует активную анимацию.
-
-Подробнее: [quartus_ssd1306/README.md](quartus_ssd1306/README.md)
-
-## Linux-драйвер
-
-В каталоге `driver/` — полноценный Linux I2C adapter driver (`i2c-zynq-master`):
+- **Device Tree:** `linux/dts/zynq-mini-revb.dts` — узел custom I²C master в PL
+- **Драйвер (in-tree пакет):** `linux/drivers/i2c-master-axi/`
+- **Out-of-tree (альтернатива):** `driver/i2c-zynq-master.c` — [DRIVER.md](doc/DRIVER.md)
+- **Userspace:** `linux/userspace/oled-clock/` — часы и переключение clock / fbcon на `/dev/fb0`
+- **Buildroot:** `buildroot/` + `make buildroot-*` — [GUIDE_BUILDROOT.md](doc/GUIDE_BUILDROOT.md)
 
 ```bash
 cd driver/
-make KERNEL_SRC=/path/to/linux-xlnx ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
+make KERNEL_SRC=/path/to/linux ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
+# на целевой системе:
+i2cdetect -y 0
 ```
-
-После загрузки модуля контроллер становится доступен через стандартные интерфейсы:
-
-```bash
-i2cdetect -y 0       # Сканирование шины
-i2cget -y 0 0x50 0   # Чтение из EEPROM
-```
-
-Подробнее: [doc/DRIVER.md](doc/DRIVER.md)
 
 ## Интеграция
 
-### Xilinx Zynq (AXI4-Lite)
-Контроллер подключается к PS через AXI Interconnect. Прерывание `irq_o` — к GIC через `IRQ_F2P`.
-Подробнее: [doc/INTEGRATION.md](doc/INTEGRATION.md)
-
-### Intel Cyclone IV (Avalon-MM)
-Контроллер подключается к NIOS II через Avalon Interconnect в Platform Designer (Qsys).
-Подробнее: [doc/INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md)
+| Платформа | Шина | Документ |
+|-----------|------|----------|
+| **Zynq-7000** | AXI4-Lite → GP0, `irq_o` → IRQ_F2P | [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md), [INTEGRATION.md](doc/INTEGRATION.md) |
+| **Cyclone IV + Nios** | Avalon-MM | [INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md) |
 
 ## Документация
 
+### Zynq (Vivado, Vitis, Linux)
+
 | Документ | Описание |
 |----------|----------|
-| [DESIGN.md](doc/DESIGN.md) | Архитектура, FSM-диаграммы, проектные решения; краткая карта регистров |
-| [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md) | Vivado/Vitis с нуля для Zynq; в §1.4 — полная карта регистров AXI-обёртки |
-| [TESTPLAN.md](doc/TESTPLAN.md) | Тестовые сценарии и план верификации |
-| [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, Device Tree, Linux-драйвер |
-| [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter driver: сборка, DT, использование |
-| [INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md) | Интеграция в Cyclone IV, NIOS II, Platform Designer |
-| [GUIDE_I2C_MASTER_CORE.md](doc/GUIDE_I2C_MASTER_CORE.md) | Пошаговый гайд по проектированию I2C ядра |
-| [GUIDE_TESTING.md](doc/GUIDE_TESTING.md) | Подробное руководство по тестированию (8 сценариев) |
-| [GUIDE_TESTING_CORE.md](doc/GUIDE_TESTING_CORE.md) | Тестирование ядра i2c_master_core напрямую (без AXI) |
-| [GUIDE_SSD1306_PROJECT.md](doc/GUIDE_SSD1306_PROJECT.md) | Подробный гайд по проекту SSD1306 OLED |
-| [EEPROM test README](quartus/README.md) | Тест EEPROM 24LC04 на Cyclone IV |
-| [SSD1306 test README](quartus_ssd1306/README.md) | Тест SSD1306 OLED + анимация на Cyclone IV |
+| **[GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](doc/GUIDE_VIVADO_VITIS_FROM_SCRATCH.md)** | Главный пошаговый гайд: AXI4-Lite, RTL, BD, симуляция §5.7, Vitis, прошивка |
+| [GUIDE_PS_PL_BUILD.md](doc/GUIDE_PS_PL_BUILD.md) | Автосборка через `make vivado-build` / `vitis-build` |
+| [GUIDE_VIVADO_ZYNQ_MINI_OLED.md](doc/GUIDE_VIVADO_ZYNQ_MINI_OLED.md) | Разбор Vivado под плату и OLED (схема, пины) |
+| [GUIDE_BUILDROOT.md](doc/GUIDE_BUILDROOT.md) | Buildroot, SD-карта, ядро |
+| [INTEGRATION.md](doc/INTEGRATION.md) | Интеграция в Zynq, DT, драйвер |
+| [DRIVER.md](doc/DRIVER.md) | Linux I2C adapter (`driver/`) |
+
+### RTL, тесты, Cyclone
+
+| Документ | Описание |
+|----------|----------|
+| [DESIGN.md](doc/DESIGN.md) | Архитектура, FSM, карта регистров (кратко) |
+| [TESTPLAN.md](doc/TESTPLAN.md) | Сценарии симуляции TEST 0…7 |
+| [GUIDE_TESTING.md](doc/GUIDE_TESTING.md) | Подробно про testbench и BFM |
+| [GUIDE_TESTING_CORE.md](doc/GUIDE_TESTING_CORE.md) | Тест ядра без обёртки |
+| [GUIDE_I2C_MASTER_CORE.md](doc/GUIDE_I2C_MASTER_CORE.md) | Проектирование ядра |
+| [INTEGRATION_CYCLONE4.md](doc/INTEGRATION_CYCLONE4.md) | Platform Designer / Qsys |
+| [GUIDE_SSD1306_PROJECT.md](doc/GUIDE_SSD1306_PROJECT.md) | SSD1306 на Cyclone IV |
+| [GUIDE_QUARTUS_EEPROM_TEST.md](doc/GUIDE_QUARTUS_EEPROM_TEST.md) | EEPROM-тест |
+| [GUIDE_QUARTUS_BOARD_TEST.md](doc/GUIDE_QUARTUS_BOARD_TEST.md) | Общий гайд по плате AX301 |
 
 ## Лицензия
 
