@@ -5,7 +5,9 @@
 # — выполняет его. Это позволяет менять последовательность загрузки прямо
 # на SD-карте без пересборки U-Boot.
 
-bootargs=console=ttyPS0,115200 earlycon root=/dev/mmcblk0p2 rootwait rw
+bootargs=console=ttyPS0,115200 earlycon fbcon=font:MINI4x6 root=/dev/mmcblk0p2 rootwait rw
+# MAC GEM0 — дублирует DTS local-mac-address и /etc/eth0-mac (для U-Boot/pxe)
+ethaddr=00:0a:35:01:02:03
 loadbit_addr=0x100000
 load_dtb_addr=0x2A00000
 load_kernel_addr=0x3000000

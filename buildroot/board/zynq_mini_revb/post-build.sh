@@ -3,8 +3,10 @@
 #
 # Tasks:
 #   * Install /etc/network/interfaces (eth0 dhcp)
-#   * Auto-load i2c-master-axi at boot
-#   * Add a banner with the project name in /etc/issue
+#   * Fixed MAC: /etc/eth0-mac + S39set-eth0-mac (before DHCP)
+#   * Auto-load i2c-master-axi at boot (S03modules)
+#   * OLED console at boot: /usr/local/bin/oled-console + S45oled-console
+#   * Banner /etc/issue, hints in /etc/profile.d/
 
 set -euo pipefail
 
@@ -80,3 +82,72 @@ if [ -d /sys/bus/i2c/devices/i2c-1 ]; then
 fi
 EOF
 chmod 0755 "${TARGET}/etc/profile.d/zynq-info.sh"
+
+# --- Фиксированный MAC eth0 (до DHCP / S40network) -------------------
+# Меняйте последние 3 октета на уникальные для каждой платы в LAN.
+# Должен совпадать с local-mac-address в zynq-mini-revb.dts (B.4).
+cat > "${TARGET}/etc/eth0-mac" <<'EOF'
+00:0a:35:01:02:03
+EOF
+
+cat > "${TARGET}/etc/init.d/S39set-eth0-mac" <<'EOF'
+#!/bin/sh
+# Применить MAC из /etc/eth0-mac до ifup/DHCP (BusyBox init).
+case "$1" in
+    start|"")
+        [ -d /sys/class/net/eth0 ] || exit 0
+        MAC=$(grep -E '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' /etc/eth0-mac 2>/dev/null | head -1)
+        [ -n "$MAC" ] || MAC="00:0a:35:01:02:03"
+        ip link set dev eth0 down 2>/dev/null || true
+        ip link set dev eth0 address "$MAC" 2>/dev/null || true
+        ip link set dev eth0 up 2>/dev/null || true
+        ;;
+    stop|restart|reload) : ;;
+    *) echo "usage: $0 {start|stop|restart|reload}"; exit 1 ;;
+esac
+exit 0
+EOF
+chmod 0755 "${TARGET}/etc/init.d/S39set-eth0-mac"
+
+# --- OLED: fbcon + getty tty1 при загрузке (E.9) -----------------------
+install -d "${TARGET}/usr/local/bin"
+cat > "${TARGET}/usr/local/bin/oled-console" <<'EOF'
+#!/bin/sh
+VTCON=/sys/class/vtconsole/vtcon1/bind
+killall -q oled-clock 2>/dev/null
+sleep 0.2
+if [ -w "$VTCON" ]; then
+    echo 1 > "$VTCON"
+else
+    echo "oled-console: cannot write $VTCON" >&2
+    exit 1
+fi
+if ! ps | grep -v grep | grep -E '[g]etty[^/]*tty1' >/dev/null; then
+    setsid /sbin/getty -L tty1 0 linux </dev/null >/dev/null 2>&1 &
+fi
+echo "OLED console ready — login on tty1 (USB keyboard)"
+EOF
+chmod 0755 "${TARGET}/usr/local/bin/oled-console"
+
+cat > "${TARGET}/etc/init.d/S45oled-console" <<'EOF'
+#!/bin/sh
+# После S03modules: ждём /dev/fb0, затем bind fbcon (E.5 / E.9).
+case "$1" in
+    start|"")
+        i=0
+        while [ ! -c /dev/fb0 ] && [ "$i" -lt 40 ]; do
+            sleep 0.25
+            i=$((i + 1))
+        done
+        [ -x /usr/local/bin/oled-console ] && /usr/local/bin/oled-console
+        ;;
+    stop)
+        killall -q oled-clock 2>/dev/null || true
+        [ -w /sys/class/vtconsole/vtcon1/bind ] && echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null || true
+        ;;
+    restart|reload) "$0" stop; "$0" start ;;
+    *) echo "usage: $0 {start|stop|restart|reload}"; exit 1 ;;
+esac
+exit 0
+EOF
+chmod 0755 "${TARGET}/etc/init.d/S45oled-console"

@@ -54,6 +54,31 @@ The driver requests the IRQ via `platform_get_irq_optional()`; if no
 interrupt is wired (or `request_irq()` fails), it gracefully falls
 back to TIP polling — convenient when iterating on hardware.
 
+## Runtime bus speed (`bus_hz` sysfs)
+
+After the module is loaded, the I2C SCL rate can be changed without
+rebuilding DT or the full image. The driver exposes **`bus_hz`** on the
+platform device (find the path on the board):
+
+```bash
+# typical Zynq MINI node name after probe:
+BUS=$(dirname $(readlink -f /sys/bus/i2c/devices/i2c-1/device))
+cat "$BUS/bus_hz"          # current Hz (from DT clock-frequency at boot)
+echo 400000 | sudo tee "$BUS/bus_hz"
+dmesg | tail -3            # new prescale line from hw_init
+i2cdetect -y 1             # must still see 0x3c
+```
+
+Limits: `bus_hz * 4 <= input_hz` (with 50 MHz AXI clock, max ~12.5 MHz
+in theory). SSD1306 modules are usually reliable up to **400 kHz**; higher
+rates may NACK depending on wiring and pull-ups.
+
+If `hw_init()` rejects a value, the driver rolls back both **`i->bus_hz`**
+and the hardware prescale to the previous frequency.
+
+Initial value still comes from DT **`clock-frequency`** at `probe`; sysfs
+only overrides until reboot (or until you write again).
+
 ## Build standalone
 
 ```bash

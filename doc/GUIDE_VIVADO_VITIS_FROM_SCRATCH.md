@@ -24,7 +24,7 @@
 | 0.4 | Плата **ZYNQ MINI Rev B** с **XC7Z020-CLG400** (или XC7Z010 — у нас по умолчанию `xc7z020clg400-1`) | Цель прошивки |
 | 0.5 | **OLED-модуль 128×64 на контроллере SSD1306**, подключённый в режиме I²C к разъёму `CAM1` платы: **SDA на пин T20, SCL на пин P20**, питание 3.3 В и общая земля | Дисплей, на котором проверяем работу |
 | 0.6 | USB-кабель Type-C (JTAG/UART идут через один разъём — `CH340E` на плате) | JTAG-прошивка и UART-терминал |
-| 0.7 | Эта папка репозитория — нужны файлы `rtl/i2c_master_core.v`, `rtl/i2c_master_axi.v`, `vivado/pins.xdc` и каталог `vitis/workspace/oled_demo/src/` | Готовый RTL и bare-metal код |
+| 0.7 | Эта папка репозитория — `rtl/i2c_master_core.v`, `rtl/i2c_master_axi.v`, `vivado/pins.xdc` | RTL и ограничения; **bare-metal пишем сами** в шаге 22 |
 | 0.8 | Терминальная программа: `minicom`, `picocom`, `screen` или PuTTY — настройка 115200 8N1 | Смотрим `xil_printf` из bare-metal |
 
 > Если у вас ZYNQ MINI с распайкой `XC7Z010` — описанное ниже всё равно работает, нужно только в шаге 1.4 выбрать `xc7z010clg400-1` вместо `xc7z020clg400-1`. Битстрим у этих чипов несовместим, но шаги те же.
@@ -233,7 +233,7 @@ flowchart TB
     M --> N[Export Hardware → XSA]
     N --> O[Vitis: создать Platform<br/>из XSA]
     O --> P[Vitis: создать Application<br/>oled_demo]
-    P --> U[Импортировать src/:<br/>i2c_master.c, ssd1306.c, main.c]
+    P --> U[Пишем bare-metal с нуля:<br/>i2c_master, ssd1306, main]
     U --> R[Build ELF]
     R --> S[Program FPGA + Run ELF<br/>через JTAG]
     S --> T[OLED показывает шахматный паттерн]
@@ -1969,6 +1969,12 @@ Vitis создаст компонент `zynq_mini_oled_platform`. В **Componen
 
 После сборки появится файл `<workspace>/zynq_mini_oled_platform/export/zynq_mini_oled_platform/zynq_mini_oled_platform.xpfm` — это «expand» платформы для применения в приложениях.
 
+### 22.2. DEBUG FSBL (опционально, UART)
+
+Если на UART после включения питания **долго тишина** до U-Boot/Linux, включите **`FSBL_DEBUG_INFO`** в `zynq_fsbl/UserConfig.cmake` (см. **§A.4.1** Linux-гайда: правка `USER_COMPILE_DEFINITIONS`, Clean+Build, новый `BOOT.BIN`). Одного пункта *Compiler → Symbols* в GUI часто **недостаточно** — символ нужно проверить в `compile_commands.json` и через `strings fsbl.elf`.
+
+Подробно (почему GUI «не работает», проверки, типичный лог): **[GUIDE_LINUX_ZYNQ_MINI_OLED.md](GUIDE_LINUX_ZYNQ_MINI_OLED.md)** §A.4.1.
+
 ---
 
 ## 23. Шаг 21. Создаём Application Component oled_demo
@@ -1981,34 +1987,325 @@ Vitis создаст компонент `zynq_mini_oled_platform`. В **Componen
 
 В **Components** появится `oled_demo`. Внутри будут:
 
-- `src/` — пустая папка под наши исходники.
-- `Empty_application.cmake` — конфигурация CMake.
-- `lscript.ld` — дефолтный линкер-скрипт (он DDR-only, нам не подходит; ниже заменим).
+- `src/` — пустая папка под исходники (шаблон *Empty* не добавляет `helloworld.c`).
+- `UserConfig.cmake` — список `.c` для сборки и путь к `lscript.ld`.
+- `lscript.ld` — дефолтный скрипт под DDR; в **шаге 22** заменим на вариант под **OCM**.
 
 ---
 
-## 24. Шаг 22. Импортируем исходники из репозитория
+## 24. Шаг 22. Разрабатываем bare-metal приложение с нуля
 
-В репозитории уже лежат готовые файлы `<repo>/vitis/workspace/oled_demo/src/`:
+После шага 21 у вас есть компонент **`oled_demo`** с **пустым** `src/` (шаблон *Empty Application*). Дальше **не импортируем** готовые файлы из репозитория — пишем их сами, слой за слоем. Так вы увидите связь между **§1.4** (регистры), **симуляцией §5.7** (те же команды CMD) и тем, что делает ARM на железе.
 
-- `main.c` — точка входа: init → infinite loop с паттерном.
-- `i2c_master.c`, `i2c_master.h` — драйвер регистровой карты `i2c_master_axi`.
-- `ssd1306.c`, `ssd1306.h` — init-последовательность SSD1306 + send_frame + demo_pattern.
-- `lscript.ld` — наш линкер-скрипт (укладывает программу в OCM, чтобы можно было запускать ДО инициализации DDR).
+> **Эталон для самопроверки.** Когда закончите шаг 22, свой код можно сравнить с уже собранным вариантом в `vitis/workspace/oled_demo/src/` — но **сначала** пройдите путь ниже без копирования.
 
-Способ 1 (рекомендуемый — Vitis Unified IDE):
+### 24.0. Что мы строим (слои)
 
-1. В **Components → oled_demo → src** правый клик → **Import Files…**
-2. Откроется файловый диалог. Перейдите в `<repo>/vitis/workspace/oled_demo/src/` (если репо — ваш workspace, файлы уже там; Vitis их обнаружит без импорта). Выделите все 6 файлов (main.c, i2c_master.c, i2c_master.h, ssd1306.c, ssd1306.h, lscript.ld).
-3. **Open**.
+```mermaid
+flowchart TB
+    MAIN[main.c] --> SSD[ssd1306.c / .h]
+    SSD --> I2C[i2c_master.c / .h]
+    I2C --> HW["MMIO: Xil_In32 / Xil_Out32<br/>base + смещение из §1.4"]
+    HW --> PL[i2c_master_axi в PL]
+    MAIN --> BSP[xil_printf, sleep, xparameters]
+    MAIN --> LD[lscript.ld → код в OCM]
+```
 
-Способ 2 (если import не помог): просто скопируйте файлы из `<repo>/vitis/workspace/oled_demo/src/` в папку `<workspace>/oled_demo/src/` через Nautilus/Explorer/cp. Vitis подхватит их автоматически (CMake пересоберёт).
+| Файл | Назначение |
+|------|------------|
+| `lscript.ld` | Куда линкер кладёт код (OCM, не DDR — для JTAG без FSBL) |
+| `i2c_master.h` | Смещения регистров и биты CMD/STATUS (контракт с RTL) |
+| `i2c_master.c` | Драйвер: init, write, read, опрос **TIP** |
+| `ssd1306.h` / `ssd1306.c` | Протокол SSD1306 поверх `i2c_write` |
+| `main.c` | `main()`: UART → I²C → OLED → цикл |
 
-> Тонкость с `lscript.ld`: дефолтный линкер кладёт program text в DDR. Это работает только после того, как DDR проинициализирован (FSBL это делает; голый JTAG-run — нет). Наш `lscript.ld` укладывает всё в OCM (256 КБ внутренней SRAM, доступной всегда). Поэтому Run в JTAG-режиме сработает без FSBL.
+**Порядок разработки:** линкер → заголовок I²C → драйвер I²C → (проверка UART) → SSD1306 → `main` → сборка.
 
-### 24.1. Чек по содержимому main.c
+---
 
-Откройте `main.c` — увидите примерно следующее:
+### 24.1. Линкер-скрипт `lscript.ld` (память OCM)
+
+Шаблон Vitis по умолчанию кладёт `.text` в **DDR**. При **Run on Hardware** без полноценного FSBL DDR может быть не готов — программа «молчит». Нам нужен **On-Chip Memory (OCM)** — 256 КБ SRAM в PS, доступная сразу после `ps7_init`.
+
+1. В **Components → oled_demo → src** уже лежит файл **`lscript.ld`** от шаблона — **откройте его** и **замените содержимое** (или **New File → lscript.ld**, если пусто).
+2. Минимальная идея, которую вы закладываете в скрипт:
+
+```ld
+MEMORY {
+   ps7_ram_0 : ORIGIN = 0x00000000, LENGTH = 0x00030000   /* 192 KiB OCM */
+   ps7_ram_1 : ORIGIN = 0xFFFF0000, LENGTH = 0x00010000   /* 64 KiB — стеки исключений */
+}
+ENTRY(_vector_table)
+SECTIONS {
+   .text : { KEEP (*(.vectors)) *(.text) *(.text.*) } > ps7_ram_0
+   .rodata : { *(.rodata) *(.rodata.*) } > ps7_ram_0
+   .data : { *(.data) *(.data.*) } > ps7_ram_0
+   .bss  : { *(.bss)  *(.bss.*)  } > ps7_ram_0
+   /* стеки, heap — в ps7_ram_1, как в типовом standalone */
+}
+```
+
+Полный скрипт с размерами стеков (`_STACK_SIZE`, `_HEAP_SIZE`, секции `.stack`, `.heap`) — **~300 строк**; допишите по образцу из документации Xilinx *Linker Script* для `standalone`, либо после своей попытки сверьте с `vitis/workspace/oled_demo/src/lscript.ld`.
+
+3. Убедитесь, что в **`UserConfig.cmake`** (в том же `src/`) есть строка (Vitis часто добавляет сама):
+
+```cmake
+set(USER_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/lscript.ld")
+```
+
+Без неё сборка возьмёт **DDR**-скрипт из BSP.
+
+---
+
+### 24.2. Заголовок `i2c_master.h` — контракт с PL
+
+**Создайте** `src/i2c_master.h`. Числа должны **совпадать** с §1.4 и с комментарием в `rtl/i2c_master_axi.v`:
+
+```c
+#ifndef I2C_MASTER_H_
+#define I2C_MASTER_H_
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#define I2C_REG_CTRL     0x00
+#define I2C_REG_STATUS   0x04
+#define I2C_REG_CMD      0x08
+#define I2C_REG_TX_DATA  0x0C
+#define I2C_REG_RX_DATA  0x10
+#define I2C_REG_PRESCALE 0x14
+#define I2C_REG_ISR      0x18
+
+#define I2C_CTRL_EN      (1u << 0)
+#define I2C_CTRL_IEN     (1u << 1)
+
+#define I2C_STATUS_TIP   (1u << 0)
+#define I2C_STATUS_RXACK (1u << 1)
+#define I2C_STATUS_BUSY  (1u << 2)
+#define I2C_STATUS_AL    (1u << 3)
+
+#define I2C_CMD_STA      (1u << 0)
+#define I2C_CMD_STO      (1u << 1)
+#define I2C_CMD_RD       (1u << 2)
+#define I2C_CMD_WR       (1u << 3)
+#define I2C_CMD_NACK     (1u << 4)
+
+void  i2c_init   (uintptr_t base, uint16_t prescale);
+bool  i2c_write  (uintptr_t base, uint8_t slave_addr, const uint8_t *data, uint32_t len);
+bool  i2c_read   (uintptr_t base, uint8_t slave_addr, uint8_t *data, uint32_t len);
+void  i2c_disable(uintptr_t base);
+
+#endif
+```
+
+**Смысл:** это не «драйвер шины», а **имена смещений** для `Xil_Out32(base + off, val)` — то же, что BFM пишет в `tb/i2c_master_tb.sv` (см. §5.7).
+
+---
+
+### 24.3. `i2c_master.c` — доступ к регистрам и ожидание TIP
+
+**Создайте** `src/i2c_master.c`. Подключите BSP:
+
+```c
+#include "i2c_master.h"
+#include "xil_io.h"
+```
+
+**Шаг A — обёртки MMIO** (одна строка чтения/записи):
+
+```c
+static inline uint32_t i2c_rd(uintptr_t base, uint32_t off)
+{
+    return Xil_In32(base + off);
+}
+static inline void i2c_wr(uintptr_t base, uint32_t off, uint32_t v)
+{
+    Xil_Out32(base + off, v);
+}
+```
+
+`uintptr_t base` — физический адрес slave на GP0, у нас **`0x43C00000`** (или макрос из `xparameters.h` после сборки platform).
+
+**Шаг B — `wait_done`:** после каждой записи в **CMD** секвенсер поднимает **TIP**; софт крутится, пока **TIP = 0** (как `wait_tip_clear` в тестбенче):
+
+```c
+static bool wait_done(uintptr_t base)
+{
+    for (uint32_t i = 0; i < 1000000u; i++) {
+        uint32_t st = i2c_rd(base, I2C_REG_STATUS);
+        if ((st & I2C_STATUS_TIP) == 0) {
+            if (st & I2C_STATUS_AL)
+                return false;   /* потеря арбитража */
+            return true;
+        }
+    }
+    return false;   /* таймаут */
+}
+```
+
+**Шаг C — `i2c_init`:** правило из §1.4 — **PRESCALE** менять при **EN=0**:
+
+```c
+void i2c_init(uintptr_t base, uint16_t prescale)
+{
+    i2c_wr(base, I2C_REG_CTRL,     0);
+    i2c_wr(base, I2C_REG_PRESCALE, prescale);
+    i2c_wr(base, I2C_REG_ISR,      0x3);          /* W1C: сброс DONE/AL */
+    i2c_wr(base, I2C_REG_CTRL,     I2C_CTRL_EN);
+}
+```
+
+**Формула PRESCALE** при `FCLK_CLK0 = 50` МГц и SCL = 100 кГц:
+
+\[
+\mathrm{PRESCALE} = \frac{50\,000\,000}{4 \times 100\,000} - 1 = 124
+\]
+
+**Шаг D — `i2c_write`:** одна транзакция «запись N байт слейву» = то, что вы уже видели в симуляции TEST 1:
+
+1. **TX_DATA** ← `{slave_addr[6:0], 0}` (бит R/W = 0).
+2. **CMD** ← `STA | WR` → `wait_done`.
+3. Проверить **STATUS.RXACK** (бит 1): если 1 — слейв ответил **NACK**, отправить **STO** и вернуть `false`.
+4. Для каждого байта данных: **TX_DATA** ← байт; **CMD** ← `WR`, на последнем байте добавить **STO**; каждый раз `wait_done`.
+
+Псевдокод цикла данных:
+
+```c
+for (uint32_t i = 0; i < len; i++) {
+    i2c_wr(base, I2C_REG_TX_DATA, data[i]);
+    uint32_t cmd = I2C_CMD_WR;
+    if (i == len - 1)
+        cmd |= I2C_CMD_STO;
+    i2c_wr(base, I2C_REG_CMD, cmd);
+    if (!wait_done(base))
+        return false;
+}
+```
+
+**Шаг E — `i2c_read`:** для чтения M байт:
+
+1. **START** + адресный байт **read**: `TX_DATA = (slave << 1) | 1`, **CMD** = `STA | WR`.
+2. Для каждого байта: **CMD** = `RD`; на **последнем** добавить **NACK | STO** (как `0x16` в §1.4); после `wait_done` прочитать **RX_DATA** `[7:0]`.
+
+**Шаг F — `i2c_disable`:** `CTRL = 0` — линии I²C отпущены.
+
+---
+
+### 24.4. Промежуточная проверка: только UART и PRESCALE (без OLED)
+
+Прежде чем писать SSD1306, убедитесь, что **базовый адрес** и **запись в регистры** работают.
+
+**Временно** создайте минимальный `main.c` (потом замените полной версией):
+
+```c
+#include "xil_printf.h"
+#include "xil_io.h"
+#include "i2c_master.h"
+
+#define I2C_BASE 0x43C00000u
+#define PRESCALE 124u
+
+int main(void)
+{
+    xil_printf("\r\nI2C smoke test\r\n");
+    i2c_init(I2C_BASE, PRESCALE);
+    xil_printf("PRESCALE read = %u\r\n",
+                 (unsigned)Xil_In32(I2C_BASE + I2C_REG_PRESCALE) & 0xFFFFu);
+    xil_printf("OK\r\n");
+    for (;;)
+        ;
+}
+```
+
+Соберите (**§24.8**), прошейте (**шаг 24**). В UART должны появиться строки. Если тишина — проблема в **lscript.ld**, **ps7_init** или UART, а не в OLED.
+
+После успеха **удалите** smoke-test и переходите к SSD1306.
+
+---
+
+### 24.5. `ssd1306.h` — адрес и API дисплея
+
+SSD1306 на модуле OLED обычно сидит на I²C **`0x3C`** (иногда **`0x3D`** — смотрите шелкографию модуля).
+
+**Создайте** `ssd1306.h`:
+
+```c
+#ifndef SSD1306_H_
+#define SSD1306_H_
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#define SSD1306_I2C_ADDR  0x3Cu
+
+bool ssd1306_init       (uintptr_t i2c_base);
+bool ssd1306_clear      (uintptr_t i2c_base);
+bool ssd1306_send_frame (uintptr_t i2c_base, const uint8_t fb[1024]);
+bool ssd1306_demo_pattern(uintptr_t i2c_base);
+
+#endif
+```
+
+Кадр **128×64** монохромный = **1024** байта (8 страниц × 128 столбцов).
+
+---
+
+### 24.6. `ssd1306.c` — протокол I²C для SSD1306
+
+Контроллер SSD1306 в режиме I²C ожидает **control byte** перед каждым блоком:
+
+| Control byte | Значение | Дальше идут |
+|--------------|----------|-------------|
+| Команды | `0x00` | байты команд (регистры дисплея) |
+| Данные GDDRAM | `0x40` | пиксельные данные |
+
+То есть на шину уходит не «голый» `0xAE`, а массив вида `{ 0x00, 0xAE, ... }` одной транзакцией `i2c_write`.
+
+**Шаг A — таблица инициализации** (по datasheet, §8.5 Power-On). Создайте статический массив — **первый байт всегда `0x00`**:
+
+```c
+static const uint8_t ssd1306_init_seq[] = {
+    0x00,              /* control: command stream */
+    0xAE,              /* Display OFF */
+    0xD5, 0x80,        /* clock divide */
+    0xA8, 0x3F,        /* multiplex 64 */
+    0xD3, 0x00,        /* display offset */
+    0x40,              /* start line */
+    0x8D, 0x14,        /* charge pump ON */
+    0x20, 0x00,        /* horizontal addressing */
+    0xA1, 0xC8,        /* remap / COM scan */
+    0xDA, 0x12,        /* COM pins */
+    0x81, 0xCF,        /* contrast */
+    0xD9, 0xF1,        /* pre-charge */
+    0xDB, 0x40,        /* VCOMH */
+    0xA4, 0xA6, 0x2E,  /* normal, scroll off */
+    0xAF               /* Display ON */
+};
+```
+
+`ssd1306_init()` — один вызов `i2c_write(base, SSD1306_I2C_ADDR, ssd1306_init_seq, sizeof(...))`.
+
+**Шаг B — окно записи** перед заливкой кадра (column 0…127, page 0…7):
+
+```c
+static const uint8_t win[] = {
+    0x00,
+    0x21, 0x00, 0x7F,
+    0x22, 0x00, 0x07
+};
+```
+
+**Шаг C — `ssd1306_send_frame`:** для каждого блока 16 байт пикселей формируйте буфер **`tx[17]`**: `tx[0]=0x40`, `tx[1..16]` — кусок framebuffer; `i2c_write(..., tx, 17)`. Всего **64** таких блока (1024 / 16).
+
+**Шаг D — `ssd1306_clear`:** локальный `uint8_t fb[1024]`, `memset(fb, 0, 1024)`, `send_frame`.
+
+**Шаг E — `ssd1306_demo_pattern`:** заполните `fb` шахматкой 8×8 ячеек (`(cell_x ^ cell_y) & 1 ? 0xFF : 0x00`) и вызовите `send_frame`.
+
+---
+
+### 24.7. `main.c` — сборка приложения
+
+**Создайте** финальный `main.c`:
 
 ```c
 #include "xparameters.h"
@@ -2017,42 +2314,99 @@ Vitis создаст компонент `zynq_mini_oled_platform`. В **Componen
 #include "i2c_master.h"
 #include "ssd1306.h"
 
-#ifdef XPAR_I2C_BASEADDR
-#  define I2C_BASE XPAR_I2C_BASEADDR
+/* BSP может назвать IP иначе — см. xparameters.h в platform */
+#if defined(XPAR_I2C_BASEADDR)
+#  define I2C_BASE  XPAR_I2C_BASEADDR
+#elif defined(XPAR_I2C_MASTER_AXI_0_BASEADDR)
+#  define I2C_BASE  XPAR_I2C_MASTER_AXI_0_BASEADDR
 #else
-#  define I2C_BASE 0x43C00000u
+#  define I2C_BASE  0x43C00000u
 #endif
 
-#define FCLK0_HZ      50000000u
-#define I2C_SCL_HZ    100000u
-#define I2C_PRESCALE  ((FCLK0_HZ / (4u * I2C_SCL_HZ)) - 1u)
+#define FCLK0_HZ     50000000u
+#define I2C_SCL_HZ   100000u
+#define I2C_PRESCALE ((FCLK0_HZ / (4u * I2C_SCL_HZ)) - 1u)
 
-int main(void) {
-    xil_printf("\r\n=== ZYNQ MINI OLED demo (PS+PL build) ===\r\n");
-    xil_printf("I2C base = 0x%08x, PRESCALE = %d\r\n", I2C_BASE, I2C_PRESCALE);
+int main(void)
+{
+    xil_printf("\r\n=== ZYNQ MINI OLED demo ===\r\n");
+    xil_printf("I2C @ 0x%08x PRESCALE=%u\r\n", (unsigned)I2C_BASE, (unsigned)I2C_PRESCALE);
 
-    i2c_init(I2C_BASE, I2C_PRESCALE);
-    if (!ssd1306_init(I2C_BASE))   { xil_printf("ERROR: SSD1306 init failed\r\n"); return -1; }
-    if (!ssd1306_clear(I2C_BASE))  { xil_printf("ERROR: OLED clear failed\r\n");   return -1; }
+    i2c_init(I2C_BASE, (uint16_t)I2C_PRESCALE);
+
+    if (!ssd1306_init(I2C_BASE)) {
+        xil_printf("ERROR: SSD1306 init (NACK?)\r\n");
+        return -1;
+    }
+    xil_printf("OLED init OK\r\n");
+
+    if (!ssd1306_clear(I2C_BASE)) {
+        xil_printf("ERROR: clear\r\n");
+        return -1;
+    }
 
     while (1) {
-        ssd1306_demo_pattern(I2C_BASE);  sleep(1);
-        ssd1306_clear(I2C_BASE);         sleep(1);
+        ssd1306_demo_pattern(I2C_BASE);
+        sleep(1);
+        ssd1306_clear(I2C_BASE);
+        sleep(1);
     }
+    return 0;
 }
 ```
 
-Логика: инициализируем I²C-мастер (выставляем PRESCALE = 124, включаем EN), инициализируем SSD1306 init-последовательностью, очищаем экран, и в цикле раз в секунду рисуем шахматный паттерн / стираем.
+**Логика:** UART подтверждает старт → I²C на 100 кГц → длинная init-цепочка на дисплей → цикл «паттерн / пауза / чёрный экран».
 
-### 24.2. Build application
+---
 
-Правый клик по `oled_demo` → **Build**. Время — **20..40 секунд**. Без ошибок результат:
+### 24.8. Подключение файлов к сборке и Build
+
+1. В **Components → oled_demo → src** должны лежать:
+   - `lscript.ld`, `i2c_master.h`, `i2c_master.c`, `ssd1306.h`, `ssd1306.c`, `main.c`
+2. Если Vitis не видит `.c` — откройте **`UserConfig.cmake`** и в `USER_COMPILE_SOURCES` перечислите (по одному в строке):
+
+```cmake
+set(USER_COMPILE_SOURCES
+"main.c"
+"i2c_master.c"
+"ssd1306.c"
+)
+```
+
+3. **Правый клик по `oled_demo` → Build** (20…40 с).
+
+Успех:
 
 ```
-<workspace>/oled_demo/build/oled_demo.elf      (~50 КБ)
+<workspace>/oled_demo/build/oled_demo.elf
 ```
 
-> Если получили ошибки про «XPAR_I2C_BASEADDR not defined» — это нормально, `xparameters.h` нашу IP-инстанцию назвал, например, `XPAR_I2C_MASTER_AXI_0_BASEADDR`. В `main.c` уже есть fallback на жёсткий `0x43C00000`, поэтому сборка пройдёт.
+| Ошибка сборки | Что проверить |
+|---------------|----------------|
+| `undefined reference to Xil_Out32` | Platform/BSP не собран — **Build** на `zynq_mini_oled_platform` |
+| `multiple definition of main` | Удалите лишний `helloworld.c` из шаблона |
+| ELF огромный / не линкуется | `USER_LINKER_SCRIPT` не указывает на ваш `lscript.ld` |
+| Linker: region overflow | Упростите буферы или увеличьте OCM-секции в `lscript.ld` |
+
+---
+
+### 24.9. Отладка по UART и на шине
+
+| Симптом | Действие |
+|---------|----------|
+| Нет вывода UART | `lscript.ld`, галочка **Initialize Processor**, 115200 8N1, `/dev/ttyUSB0` |
+| `PRESCALE read` не 124 | Неверный `I2C_BASE` — откройте `xparameters.h`, найдите `*_BASEADDR` вашего IP |
+| `SSD1306 init (NACK?)` | Питание 3.3 V, SDA/SCL на **T20/P20**, адрес **0x3C** vs **0x3D**, перемычки BS на модуле |
+| Init OK, экран чёрный | Нет `0x8D 0x14` (charge pump) или не вызван `ssd1306_send_frame` после `set_window` |
+| Всё OK в `make sim-axi`, fail на плате | PRESCALE под реальный FCLK (50 vs 100 МГц), пины PL, битстрим прошит |
+
+Логика **та же**, что в §5.7: если симуляция зелёная, а OLED молчит — ищите **адрес**, **пины**, **битстрим**, не переписывайте секвенсер вслепую.
+
+---
+
+### 24.10. (Опционально) Сверка с готовым деревом в репозитории
+
+После самостоятельной реализации можно построчно сравнить с `vitis/workspace/oled_demo/src/`. Автоматизация `make vitis-build` / `vitis/build.py` **импортирует** эти файлы — для обучения используйте **ручной** путь шага 22; для CI — скрипты.
 
 ---
 
@@ -2142,7 +2496,7 @@ I2C base = 0x43c00000, PRESCALE = 124
 
 ## 29. Что дальше
 
-- **Linux вместо bare-metal:** XSA из шага 18 пригоден для импорта в Buildroot/PetaLinux. В нашем репо это сделано через Buildroot — см. `doc/GUIDE_BUILDROOT.md` и `doc/GUIDE_PS_PL_BUILD.md`.
+- **Linux вместо bare-metal:** после шага 18 (XSA + bitstream) — **[GUIDE_LINUX_ZYNQ_MINI_OLED.md](GUIDE_LINUX_ZYNQ_MINI_OLED.md)**: FSBL, Buildroot, `bootgen`, SD и fbcon **создаются по шагам**; не используются готовые `vitis-build` / `deploy.sh` / образы из репозитория. Справка `make buildroot-*` — `doc/GUIDE_BUILDROOT.md`.
 - **Прерывания вместо опроса:** включите `IEN` в `CTRL`, регистрируйте обработчик через `XScuGic_Connect` на `XPAR_FABRIC_I2C_IRQ_INTR` (имя смотрите в `xparameters.h` после сборки BSP), и обрабатывайте `DONE/AL` в ISR.
 - **Дополнительные периферии в PL:** добавьте ещё IP (DMA, GPIO, BRAM) — Connection Automation сама добавит новый порт на AXI Interconnect и распределит адреса. Адресное пространство `0x43C0_xxxx..0x7FFF_FFFF` свободно.
 - **Симуляция:** в репо есть `quartus_ssd1306/sim/` с testbench'ами для SSD1306-контроллера. Под Vivado-симуляцию аналогично — `Add Sources → Simulation Sources`, выберите `i2c_master_*_tb.v`.
@@ -2240,6 +2594,8 @@ make vivado-program        # прошивка PL через JTAG (vivado/program
 ```
 
 ## A.3. Эквивалент шагов 19–24 (Vitis) — `vitis/build.py`
+
+> **Шаг 22 мануала** — разработка **с нуля** в GUI. Скрипт ниже — **автоматизация**: он создаёт platform/app и **импортирует** уже готовые файлы из `vitis/workspace/oled_demo/src/` (или `vitis/src`). Для обучения сначала пройдите §24 вручную.
 
 Vitis Unified CLI принимает не Tcl, а **Python**. Скрипт `vitis/build.py` делает:
 

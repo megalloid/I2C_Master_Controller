@@ -4,6 +4,12 @@
 rootfs) c встроенным драйвером `i2c-master-axi`. На выходе — образ
 `sdcard.img`, которым можно сразу прошить SD-карту и загрузить плату.
 
+> **Пошаговый мануал** (вход только с XSA/bitstream из
+> [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](GUIDE_VIVADO_VITIS_FROM_SCRATCH.md) §18;
+> FSBL, SD, fbcon без готовых артефактов) —
+> **[GUIDE_LINUX_ZYNQ_MINI_OLED.md](GUIDE_LINUX_ZYNQ_MINI_OLED.md)**.
+> Этот файл — сжатый рецепт `make buildroot-*` для справки.
+
 > **Вход:** успешно отработал `make vivado-build` (есть `.bit` и `.xsa`)
 > и в `/opt/xilinx/2025.2/Vitis/gnu/aarch32/lin/` стоит
 > `gcc-arm-linux-gnueabi`.
@@ -102,22 +108,20 @@ sudo dnf install -y gcc gcc-c++ make bc bison flex openssl-devel \
 
 ## 4. Сборка PL и FSBL (если ещё не сделано)
 
+Для **пошагового** пути без опоры на готовые workspace/образы см.
+**[GUIDE_LINUX_ZYNQ_MINI_OLED.md](GUIDE_LINUX_ZYNQ_MINI_OLED.md)** (вход — только
+XSA и bitstream из [GUIDE_VIVADO_VITIS_FROM_SCRATCH.md](GUIDE_VIVADO_VITIS_FROM_SCRATCH.md)
+§18, затем FSBL в Vitis GUI).
+
+Краткий автоматизированный вариант (если уже настроен `build.tcl`):
+
 ```bash
-make vivado-build PART=xc7z020clg400-1   # либо xc7z010
-make vitis-build                         # сгенерирует FSBL ELF
+make vivado-build PART=xc7z020clg400-1
+# FSBL — вручную в Vitis из XSA (см. Linux-гайд), не обязательно make vitis-build
 ```
 
-После этого должны появиться:
-```
-vivado/zynq_mini_oled.xsa
-vivado/proj/.../zynq_mini_oled_top.bit
-vitis/workspace/.../fsbl.elf
-```
-
-> **Важно:** в `vivado/build.tcl` теперь полная PS7-конфигурация
-> (DDR3 MT41J256M16 16-bit, UART1/SD0/ENET0/USB0/QSPI). Это критично для
-> Linux — при минимальной конфигурации (как в bare-metal) у платы
-> молчит DDR и ядро повиснет на etree.
+> **Важно:** для Linux в Block Design PS7 должен быть с **DDR** (см. §7.3
+> Vivado-мануала). Иначе ядро повиснет при старте.
 
 ---
 

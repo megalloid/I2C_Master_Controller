@@ -39,6 +39,10 @@
  * device-tree changes, but the controller is fast enough for SSD1306 traffic
  * even without interrupts. Pass `interrupts = <...>` and the driver will
  * automatically use IRQ-driven completion.
+ *
+ * Runtime bus speed (without DT rebuild): sysfs on the platform device
+ *   .../bus_hz   (read/write, Hz)
+ * Example: echo 400000 > .../bus_hz   (Fast-mode I2C, if wiring/OLED allow)
  */
 
 #include <linux/clk.h>
@@ -50,9 +54,11 @@
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 
 #define DRV_NAME			"i2c-master-axi"
 
@@ -97,6 +103,7 @@ struct i2c_master_axi {
 	bool			use_irq;
 	u32			input_hz;
 	u32			bus_hz;
+	struct mutex		lock;
 };
 
 static inline u32 axi_read(struct i2c_master_axi *i, u32 off)
@@ -219,20 +226,27 @@ static int axi_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	int k, ret;
 	u32 status;
 
+	mutex_lock(&i->lock);
+
 	status = axi_read(i, I2C_REG_STATUS);
 	if (status & STATUS_BUSY) {
 		dev_dbg(i->dev, "bus busy at xfer start (status=0x%02x)\n",
 			status);
-		return -EAGAIN;
+		ret = -EAGAIN;
+		goto out_unlock;
 	}
 
 	for (k = 0; k < num; k++) {
 		ret = axi_xfer_one(i, &msgs[k], (k == 0), (k == num - 1));
 		if (ret < 0)
-			return ret;
+			goto out_unlock;
 	}
 
-	return num;
+	ret = num;
+
+out_unlock:
+	mutex_unlock(&i->lock);
+	return ret;
 }
 
 static u32 axi_functionality(struct i2c_adapter *adap)
@@ -300,6 +314,55 @@ static int i2c_master_axi_hw_init(struct i2c_master_axi *i)
 	return 0;
 }
 
+static ssize_t bus_hz_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
+{
+	struct i2c_master_axi *i = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", i->bus_hz);
+}
+
+static ssize_t bus_hz_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct i2c_master_axi *i = dev_get_drvdata(dev);
+	unsigned int hz;
+	u32 old_hz;
+	int ret, rollback;
+
+	if (kstrtouint(buf, 0, &hz) || hz == 0)
+		return -EINVAL;
+
+	mutex_lock(&i->lock);
+
+	old_hz = i->bus_hz;
+	i->bus_hz = hz;
+	ret = i2c_master_axi_hw_init(i);
+	if (ret) {
+		i->bus_hz = old_hz;
+		rollback = i2c_master_axi_hw_init(i);
+		if (rollback)
+			dev_err(i->dev,
+				"bus_hz rollback to %u Hz failed (%d)\n",
+				old_hz, rollback);
+	}
+
+	mutex_unlock(&i->lock);
+
+	return ret ? ret : count;
+}
+
+static DEVICE_ATTR_RW(bus_hz);
+
+static struct attribute *i2c_master_axi_dev_attrs[] = {
+	&dev_attr_bus_hz.attr,
+	NULL,
+};
+
+static const struct attribute_group i2c_master_axi_dev_group = {
+	.attrs = i2c_master_axi_dev_attrs,
+};
+
 static int i2c_master_axi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -312,6 +375,7 @@ static int i2c_master_axi_probe(struct platform_device *pdev)
 
 	i->dev = dev;
 	init_completion(&i->cmd_done);
+	mutex_init(&i->lock);
 	platform_set_drvdata(pdev, i);
 
 	i->regs = devm_platform_ioremap_resource(pdev, 0);
@@ -367,7 +431,14 @@ static int i2c_master_axi_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_disable;
 
+	ret = devm_device_add_group(dev, &i2c_master_axi_dev_group);
+	if (ret)
+		goto err_del_adap;
+
 	return 0;
+
+err_del_adap:
+	i2c_del_adapter(&i->adap);
 
 err_disable:
 	axi_write(i, I2C_REG_CTRL, 0);

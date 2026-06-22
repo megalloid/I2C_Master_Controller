@@ -92,6 +92,8 @@
 
 &gem0 {
 	status = "okay";
+	/* Фиксированный MAC (OUI 00:0a:35 — Xilinx). Совпадает с /etc/eth0-mac в post-build. */
+	local-mac-address = [00 0a 35 01 02 03];
 	phy-mode = "rgmii-id";
 	phy-handle = <&ethernet_phy>;
 
