@@ -230,7 +230,3 @@ i2cdetect -y 0
 | [GUIDE_SSD1306_PROJECT.md](doc/GUIDE_SSD1306_PROJECT.md) | SSD1306 на Cyclone IV |
 | [GUIDE_QUARTUS_EEPROM_TEST.md](doc/GUIDE_QUARTUS_EEPROM_TEST.md) | EEPROM-тест |
 | [GUIDE_QUARTUS_BOARD_TEST.md](doc/GUIDE_QUARTUS_BOARD_TEST.md) | Общий гайд по плате AX301 |
-
-## Лицензия
-
-MIT
