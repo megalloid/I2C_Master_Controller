@@ -82,7 +82,7 @@ I2C_Master_Controller/
 │   ├── drivers/i2c-master-axi/
 │   └── userspace/oled-clock/
 ├── driver/                      # Out-of-tree i2c-zynq-master module (alt.)
-├── buildroot/                   # BR2 external for ZYNQ MINI Rev B
+├── buildroot_zynq-mini/my_external_tree/ # BR2 external for ZYNQ MINI Rev B
 ├── boot/                        # JTAG boot (FSBL + bitstream)
 ├── quartus/                     # EEPROM 24LC04 on Cyclone IV
 ├── quartus_ssd1306/             # SSD1306 OLED on Cyclone IV

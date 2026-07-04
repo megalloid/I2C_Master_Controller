@@ -1,0 +1,4 @@
+[submodule "buildroot_zynq-mini/buildroot"]
+	path = buildroot_zynq-mini/buildroot
+	url = https://github.com/buildroot/buildroot
+	branch = master
